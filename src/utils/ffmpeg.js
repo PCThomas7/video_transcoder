@@ -45,4 +45,16 @@ export const transcodeVideo = async (inputPath, outputDir) => {
             throw e;
         }
     }
+
+    // Create master playlist
+    let masterPlaylistContent = '#EXTM3U\n#EXT-X-VERSION:3\n';
+
+    for (const [resolution, opts] of Object.entries(resolutions)) {
+        const bandwidth = parseInt(opts.bitrate.replace('k', '')) * 1000;
+        masterPlaylistContent += `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${opts.width}x${opts.height}\n`;
+        masterPlaylistContent += `${resolution}/index.m3u8\n`;
+    }
+
+    const masterPlaylistPath = path.join(outputDir, 'master.m3u8');
+    await fs.writeFile(masterPlaylistPath, masterPlaylistContent);
 };

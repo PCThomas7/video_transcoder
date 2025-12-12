@@ -130,7 +130,7 @@ class UploadController {
                 // For direct access with pre-signed URL (expires in 24 hours)
                 hlsPlaylistUrl: hlsPlaylistSignedUrl,
                 // For streaming via proxy (recommended for HLS playback)
-                hlsStreamUrl: hlsProxyUrl,
+                hlsStreamUrl: `${baseUrl}/api/upload/hls/${hlsPrefix}/master.m3u8`,
                 // Video ID for future reference
                 videoId: hlsPrefix,
                 // Include segment info for debugging/advanced usage
@@ -196,6 +196,41 @@ class UploadController {
     }
 
     /**
+     * Proxy endpoint to serve HLS master playlist
+     */
+    async proxyHlsMaster(req, res) {
+        try {
+            const { videoId } = req.params;
+            const key = `${videoId}/master.m3u8`;
+
+            const params = {
+                Bucket: process.env.AWS_S3_BUCKET_NAME,
+                Key: key,
+            };
+
+            const data = await s3.getObject(params).promise();
+            let playlistContent = data.Body.toString('utf-8');
+
+            // Rewrite variant playlist URLs to point to our proxy endpoint
+            const baseUrl = `${req.protocol}://${req.get('host')}`;
+            // The master playlist contains lines like "360p/index.m3u8"
+            // We want to rewrite them to look like: "{baseUrl}/api/upload/hls/{videoId}/360p/playlist.m3u8"
+
+            playlistContent = playlistContent.replace(
+                /^(\d+p)\/index\.m3u8$/gm,
+                `${baseUrl}/api/upload/hls/${videoId}/$1/playlist.m3u8`
+            );
+
+            res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            return res.send(playlistContent);
+        } catch (error) {
+            console.error('Error proxying HLS master playlist:', error);
+            return res.status(500).json({ error: 'Error fetching HLS master playlist' });
+        }
+    }
+
+    /**
      * Proxy endpoint to serve HLS segments (.ts files)
      */
     async proxyHlsSegment(req, res) {
@@ -227,10 +262,16 @@ class UploadController {
         try {
             const { videoId, quality } = req.params;
             const baseUrl = `${req.protocol}://${req.get('host')}`;
-            const hlsProxyUrl = `${baseUrl}/api/upload/hls/${videoId}/${quality || '360p'}/playlist.m3u8`;
+            // Return master playlist by default if no quality specified, otherwise specific quality
+            let proxyUrl;
+            if (quality) {
+                proxyUrl = `${baseUrl}/api/upload/hls/${videoId}/${quality}/playlist.m3u8`;
+            } else {
+                proxyUrl = `${baseUrl}/api/upload/hls/${videoId}/master.m3u8`;
+            }
 
             return res.status(200).json({
-                hlsPlaylistUrl: hlsProxyUrl,
+                hlsPlaylistUrl: proxyUrl,
                 message: 'Use this URL with an HLS player'
             });
         } catch (error) {

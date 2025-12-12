@@ -12,6 +12,9 @@ router.post('/upload', multerMemory.single('video'), uploadController.uploadVide
 router.post('/upload-transcode', multerMemory.single('video'), uploadController.uploadAndTranscode.bind(uploadController));
 
 // HLS Proxy Routes - These allow streaming from private S3/Wasabi buckets
+// Get the HLS master playlist
+router.get('/hls/:videoId/master.m3u8', uploadController.proxyHlsMaster.bind(uploadController));
+
 // Get the HLS playlist (rewrites segment URLs to point to our proxy)
 router.get('/hls/:videoId/:quality/playlist.m3u8', uploadController.proxyHlsPlaylist.bind(uploadController));
 
