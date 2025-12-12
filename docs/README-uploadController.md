@@ -139,7 +139,7 @@ Uploads the entire transcoded folder structure to S3.
 return res.status(200).json({
     videoUrl: videoSignedUrl,
     hlsPlaylistUrl: hlsPlaylistSignedUrl,
-    hlsStreamUrl: hlsProxyUrl,
+    hlsStreamUrl: `${baseUrl}/api/upload/hls/${hlsPrefix}/master.m3u8`,
     videoId: hlsPrefix,
     hlsSegments: segments,
     expiresIn: '24 hours',
@@ -198,7 +198,8 @@ Request arrives with video file
 │ 4. UPLOAD HLS       │
 │    FOLDER TO S3     │
 │                     │
-│    All .m3u8 and    │
+│    master.m3u8,     │
+│    all .m3u8 and    │
 │    .ts files        │
 └─────────┬───────────┘
           │
@@ -221,7 +222,34 @@ Request arrives with video file
 
 ---
 
-## 🔧 Method 3: proxyHlsPlaylist
+## 🔧 Method 3: proxyHlsMaster
+
+```javascript
+async proxyHlsMaster(req, res) {
+    const { videoId } = req.params;
+    const key = `${videoId}/master.m3u8`;
+    
+    // Fetch playlist from S3
+    const data = await s3.getObject(params).promise();
+    let playlistContent = data.Body.toString('utf-8');
+    
+    // Rewrite variant playlist URLs to point to our proxy
+    playlistContent = playlistContent.replace(
+        /^(\d+p)\/index\.m3u8$/gm,
+        `${baseUrl}/api/upload/hls/${videoId}/$1/playlist.m3u8`
+    );
+    
+    res.send(playlistContent);
+}
+```
+
+### Why Do We Need This?
+
+The **Master Playlist** references other playlists (e.g., `360p/index.m3u8`). For the proxy to work, we must rewrite these references so the player requests the quality playlists through our server as well.
+
+---
+
+## 🔧 Method 4: proxyHlsPlaylist
 
 ```javascript
 async proxyHlsPlaylist(req, res) {
@@ -289,7 +317,7 @@ Simply fetches a video segment from S3 and streams it to the client.
 ```javascript
 async getStreamUrl(req, res) {
     const { videoId, quality } = req.params;
-    const hlsProxyUrl = `${baseUrl}/api/upload/hls/${videoId}/${quality || '360p'}/playlist.m3u8`;
+    const hlsProxyUrl = `${baseUrl}/api/upload/hls/${videoId}/${quality || 'master.m3u8'}`;
     
     return res.json({
         hlsPlaylistUrl: hlsProxyUrl,
@@ -359,7 +387,7 @@ Benefits:
     "message": "Video uploaded and transcoded successfully",
     "videoUrl": "https://bucket.s3.wasabisys.com/video.mp4?signature=...",
     "hlsPlaylistUrl": "https://bucket.s3.wasabisys.com/.../360p/index.m3u8?signature=...",
-    "hlsStreamUrl": "http://localhost:2000/api/upload/hls/abc123/360p/playlist.m3u8",
+    "hlsStreamUrl": "http://localhost:2000/api/upload/hls/abc123/master.m3u8",
     "videoId": "abc123-myvideo",
     "hlsSegments": [...],
     "expiresIn": "24 hours"

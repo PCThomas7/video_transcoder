@@ -77,7 +77,20 @@ router.post('/upload-transcode',
 
 ---
 
-### 3. HLS Playlist Proxy
+### 3. HLS Master Playlist Proxy
+```javascript
+router.get('/hls/:videoId/master.m3u8', 
+    uploadController.proxyHlsMaster.bind(uploadController)
+);
+```
+
+**Example URL:** `/api/upload/hls/abc123-video/master.m3u8`
+
+**What it does:** Fetches the **Master Playlist** from S3. This playlist links to all the other quality levels (360p, 480p, etc.) and allows the video player to automatically switch qualities.
+
+---
+
+### 4. HLS Playlist Proxy
 ```javascript
 router.get('/hls/:videoId/:quality/playlist.m3u8', 
     uploadController.proxyHlsPlaylist.bind(uploadController)
@@ -97,7 +110,7 @@ router.get('/hls/:videoId/:quality/playlist.m3u8',
 
 ---
 
-### 4. HLS Segment Proxy
+### 5. HLS Segment Proxy
 ```javascript
 router.get('/hls/:videoId/:quality/:segment', 
     uploadController.proxyHlsSegment.bind(uploadController)
@@ -110,7 +123,7 @@ router.get('/hls/:videoId/:quality/:segment',
 
 ---
 
-### 5. Get Stream URL
+### 6. Get Stream URL
 ```javascript
 router.get('/stream/:videoId/:quality?', 
     uploadController.getStreamUrl.bind(uploadController)
@@ -186,6 +199,7 @@ req.params.segment  // 'segment000.ts'
 |--------|----------|-------------|--------------|
 | POST | `/api/upload/upload` | Upload video without transcoding | `multipart/form-data` with 'video' field |
 | POST | `/api/upload/upload-transcode` | Upload and transcode video | `multipart/form-data` with 'video' field |
+| GET | `/api/upload/hls/:videoId/master.m3u8` | Get HLS master playlist | - |
 | GET | `/api/upload/hls/:videoId/:quality/playlist.m3u8` | Get HLS playlist | - |
 | GET | `/api/upload/hls/:videoId/:quality/:segment` | Get HLS segment | - |
 | GET | `/api/upload/stream/:videoId/:quality?` | Get stream URL | - |

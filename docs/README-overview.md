@@ -129,7 +129,8 @@ Each file has its own detailed documentation:
 |--------|----------|-------------|
 | POST | `/api/upload/upload` | Upload video without transcoding |
 | POST | `/api/upload/upload-transcode` | Upload and transcode video to HLS |
-| GET | `/api/upload/hls/:videoId/:quality/playlist.m3u8` | Get HLS playlist |
+| GET | `/api/upload/hls/:videoId/master.m3u8` | Get HLS master playlist (Adaptive Video) |
+| GET | `/api/upload/hls/:videoId/:quality/playlist.m3u8` | Get HLS playlist for specific quality |
 | GET | `/api/upload/hls/:videoId/:quality/:segment` | Get HLS video segment |
 | GET | `/api/upload/stream/:videoId/:quality?` | Get streaming URL |
 

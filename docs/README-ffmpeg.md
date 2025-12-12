@@ -108,6 +108,7 @@ After transcoding, the output directory looks like:
 
 ```
 outputDir/
+├── master.m3u8       ← Master Playlist (links them all)
 ├── 360p/
 │   ├── index.m3u8        ← Playlist file
 │   ├── segment000.ts     ← First 15 seconds
@@ -158,6 +159,16 @@ outputDir/
 │ segment001.ts │    │ segment001.ts │    │ segment001.ts │
 │ ...           │    │ ...           │    │ ...           │
 └───────────────┘    └───────────────┘    └───────────────┘
+└───────────────┘    └───────────────┘    └───────────────┘
+                              │                    │                    │
+                              └────────────────────┼────────────────────┘
+                                                   │
+                                                   ▼
+                                         ┌─────────────────────┐
+                                         │  GENERATE MASTER    │
+                                         │  PLAYLIST           │
+                                         │  (master.m3u8)      │
+                                         └─────────────────────┘
 ```
 
 ---
