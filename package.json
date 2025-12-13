@@ -6,15 +6,22 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon --env-file=.env src/index.js "
+    "dev": "nodemon --env-file=.env src/index.js",
+    "worker": "node --env-file=.env src/workers/transcodeWorker.js",
+    "worker:dev": "nodemon --env-file=.env src/workers/transcodeWorker.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.520.0",
+    "@aws-sdk/lib-storage": "^3.948.0",
     "aws-sdk": "^2.1234.0",
-    "express": "^4.17.1",
-    "multer": "^1.4.2",
+    "bullmq": "^5.66.0",
     "cors": "^2.8.5",
-    "uuid": "^8.3.2",
-    "@aws-sdk/client-s3": "^3.520.0"
+    "express": "^4.17.1",
+    "ioredis": "^5.8.2",
+    "mongoose": "^9.0.1",
+    "multer": "^1.4.2",
+    "multer-s3": "^3.0.1",
+    "uuid": "^8.3.2"
   },
   "devDependencies": {
     "nodemon": "^2.0.7"
