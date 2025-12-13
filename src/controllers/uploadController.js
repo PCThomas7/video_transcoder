@@ -232,6 +232,7 @@ class UploadController {
 
     /**
      * Proxy endpoint to serve HLS segments (.ts files)
+     * OPTIMIZED: Uses streaming instead of buffering for faster HD playback
      */
     async proxyHlsSegment(req, res) {
         try {
@@ -243,14 +244,34 @@ class UploadController {
                 Key: key,
             };
 
-            const data = await s3.getObject(params).promise();
+            // Get object metadata first to set content-length
+            const headData = await s3.headObject(params).promise();
 
+            // Set headers for streaming
             res.setHeader('Content-Type', 'video/MP2T');
+            res.setHeader('Content-Length', headData.ContentLength);
             res.setHeader('Access-Control-Allow-Origin', '*');
-            return res.send(data.Body);
+            res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache segments for 1 year
+            res.setHeader('Accept-Ranges', 'bytes');
+
+            // Stream directly from S3 to response (no buffering!)
+            const s3Stream = s3.getObject(params).createReadStream();
+
+            s3Stream.on('error', (err) => {
+                console.error('S3 stream error:', err);
+                if (!res.headersSent) {
+                    res.status(500).json({ error: 'Error streaming segment' });
+                }
+            });
+
+            // Pipe S3 stream directly to response
+            s3Stream.pipe(res);
+
         } catch (error) {
             console.error('Error proxying HLS segment:', error);
-            return res.status(500).json({ error: 'Error fetching HLS segment' });
+            if (!res.headersSent) {
+                return res.status(500).json({ error: 'Error fetching HLS segment' });
+            }
         }
     }
 

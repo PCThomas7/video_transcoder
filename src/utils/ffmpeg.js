@@ -25,11 +25,15 @@ export const transcodeVideo = async (inputPath, outputDir) => {
             '-i', inputPath,
             '-vf', `scale=w=${opts.width}:h=${opts.height}`,
             '-c:v', 'libx264',
+            '-preset', 'fast', // Faster encoding (options: ultrafast, superfast, veryfast, faster, fast, medium)
             '-b:v', opts.bitrate,
+            '-maxrate', opts.bitrate, // Constrain max bitrate
+            '-bufsize', `${parseInt(opts.bitrate) * 2}k`, // Buffer size = 2x bitrate
             '-c:a', 'aac',
             '-b:a', opts.audioBitrate,
             '-f', 'hls',
-            '-hls_time', '15',
+            '-hls_time', '4', // 4-second segments (was 15) - faster initial load
+            '-hls_list_size', '0', // Include all segments in playlist
             '-hls_playlist_type', 'vod',
             '-hls_segment_filename', segmentPattern,
             '-start_number', '0',

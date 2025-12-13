@@ -201,7 +201,12 @@ const startWorker = async () => {
 
     const worker = new Worker('video-transcode', processJob, {
         connection: redisConnection,
-        concurrency: parseInt(process.env.WORKER_CONCURRENCY) || 2, // Process 2 jobs at a time
+        concurrency: parseInt(process.env.WORKER_CONCURRENCY) || 2,
+        // Lock duration - how long the job is locked before being considered stalled
+        lockDuration: 300000, // 5 minutes (transcoding can take a while)
+        lockRenewTime: 150000, // Renew lock every 2.5 minutes
+        stalledInterval: 60000, // Check for stalled jobs every minute
+        maxStalledCount: 2, // Allow job to be stalled twice before failing
         limiter: {
             max: 10,
             duration: 60000 // Max 10 jobs per minute
@@ -209,11 +214,19 @@ const startWorker = async () => {
     });
 
     worker.on('completed', (job, result) => {
-        console.log(`[Worker] Job ${job.id} completed`);
+        console.log(`[Worker] ✓ Job ${job.id} completed successfully`);
     });
 
     worker.on('failed', (job, error) => {
-        console.error(`[Worker] Job ${job?.id} failed:`, error.message);
+        console.error(`[Worker] ✗ Job ${job?.id} failed: ${error.message}`);
+    });
+
+    worker.on('stalled', (jobId) => {
+        console.warn(`[Worker] ⚠ Job ${jobId} stalled - will be retried`);
+    });
+
+    worker.on('progress', (job, progress) => {
+        console.log(`[Worker] → Job ${job.id} progress: ${progress}%`);
     });
 
     worker.on('error', (error) => {
@@ -223,9 +236,11 @@ const startWorker = async () => {
     // Graceful shutdown
     const shutdown = async () => {
         console.log('[Worker] Shutting down gracefully...');
+        console.log('[Worker] Waiting for active jobs to complete (max 30s)...');
         await worker.close();
         await redisConnection.quit();
         await mongoose.disconnect();
+        console.log('[Worker] Shutdown complete');
         process.exit(0);
     };
 
@@ -233,6 +248,7 @@ const startWorker = async () => {
     process.on('SIGINT', shutdown);
 
     console.log('[Worker] Worker is ready and listening for jobs');
+    console.log(`[Worker] Concurrency: ${parseInt(process.env.WORKER_CONCURRENCY) || 2}`);
 };
 
 // Run worker if executed directly

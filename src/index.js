@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import connectDB from './config/db.js';
-import { redisConnection } from './config/queue.js';
+import { redisConnection, initQueueEvents } from './config/queue.js';
 import uploadRouter from './routes/upload.js';
 
 const app = express();
@@ -29,6 +29,9 @@ const startServer = async () => {
         // Verify Redis connection
         await redisConnection.ping();
         console.log('Redis ping successful');
+
+        // Initialize queue event listeners for status tracking
+        await initQueueEvents();
 
         // Start Express server
         app.listen(port, () => {

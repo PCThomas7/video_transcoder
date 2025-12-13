@@ -25,6 +25,21 @@ router.get('/v1/jobs',
     asyncUploadController.listJobs.bind(asyncUploadController)
 );
 
+// Retry a failed job
+router.post('/v1/jobs/:jobId/retry',
+    asyncUploadController.retryFailedJob.bind(asyncUploadController)
+);
+
+// Delete a job
+router.delete('/v1/jobs/:jobId',
+    asyncUploadController.deleteJob.bind(asyncUploadController)
+);
+
+// Get queue statistics
+router.get('/v1/queue/stats',
+    asyncUploadController.getQueueStatistics.bind(asyncUploadController)
+);
+
 // ============================================
 // Legacy API - Sync Upload (Kept for backwards compatibility)
 // ============================================
