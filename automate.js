@@ -8,7 +8,7 @@ import IORedis from "ioredis";
 import crypto from "crypto";
 import Job from "./src/models/Job.js";
 
-import Lesson from "./src/models/Lesson.js";
+import LessonTranscode from "./src/models/LessonTranscode.js";
 import connectDB from "./src/config/db.js";
 
 const app = express();
@@ -42,7 +42,7 @@ const s3 = new S3Client({
 
 const BUCKET = process.env.WASABI_BUCKET;
 const redis = new IORedis(process.env.REDIS_URL || "redis://127.0.0.1:6379");
-const transcodeQueue = new Queue("transcode", { connection: redis });
+const transcodeQueue = new Queue("video-transcode", { connection: redis });
 
 // ====== HELPERS ======
 function omeHeaders() {
@@ -250,7 +250,7 @@ app.post("/ome/admission", async (req, res) => {
 
             // Create/Update Lesson with Raw URL
             try {
-                await Lesson.findOneAndUpdate(
+                await LessonTranscode.findOneAndUpdate(
                     { lessonId: effectiveLessonId },
                     {
                         videoUrl: `https://${BUCKET}.s3.${s3.config.region}.wasabisys.com/${key}`,

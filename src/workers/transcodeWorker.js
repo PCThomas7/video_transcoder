@@ -9,7 +9,7 @@ import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { S3Client } from '@aws-sdk/client-s3';
 import { transcodeVideo } from '../utils/ffmpeg.js';
 import Job from '../models/Job.js';
-import Lesson from '../models/Lesson.js';
+import LessonTranscode from '../models/LessonTranscode.js';
 
 // Load environment variables (for standalone worker process)
 const loadEnv = async () => {
@@ -99,9 +99,9 @@ const processJob = async (job) => {
         );
 
         if (lessonId && transcodeType === 'fast') {
-            await Lesson.findOneAndUpdate({ lessonId }, { transcodingStatus: 'processing_low' });
+            await LessonTranscode.findOneAndUpdate({ lessonId }, { transcodingStatus: 'processing_low' });
         } else if (lessonId && (transcodeType === 'full' || transcodeType === 'full_remaining')) {
-            await Lesson.findOneAndUpdate({ lessonId }, { transcodingStatus: 'processing_high' });
+            await LessonTranscode.findOneAndUpdate({ lessonId }, { transcodingStatus: 'processing_high' });
         }
 
         // Create temp directory
@@ -160,7 +160,7 @@ const processJob = async (job) => {
             // Actually, if 'fast' is done, user can watch.
             // Let's set to 'processing_low' done?
             // The plan said: "Fast Transcode (Low Quality / 360p) first, updates the Lesson with this HLS URL for immediate playback."
-            await Lesson.findOneAndUpdate({ lessonId }, lessonUpdate);
+            await LessonTranscode.findOneAndUpdate({ lessonId }, lessonUpdate);
         }
 
         // Update job as completed
@@ -227,7 +227,7 @@ const processJob = async (job) => {
         );
 
         if (lessonId) {
-            await Lesson.findOneAndUpdate({ lessonId }, { transcodingStatus: 'failed' });
+            await LessonTranscode.findOneAndUpdate({ lessonId }, { transcodingStatus: 'failed' });
         }
 
         throw error;

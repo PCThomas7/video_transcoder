@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const LessonSchema = new mongoose.Schema({
+const LessonTranscodeSchema = new mongoose.Schema({
     lessonId: {
         type: String,
         required: true,
@@ -34,6 +34,6 @@ const LessonSchema = new mongoose.Schema({
     timestamps: true
 });
 
-const Lesson = mongoose.model('Lesson', LessonSchema);
+const LessonTranscode = mongoose.model('LessonTranscode', LessonTranscodeSchema);
 
-export default Lesson;
+export default LessonTranscode;
