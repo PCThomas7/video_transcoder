@@ -31,13 +31,24 @@ const loadEnv = async () => {
 const createS3Client = () => {
     const wasabiEndpoint = process.env.WASABI_ENDPOINT || 's3.ap-south-1.wasabisys.com';
     const endpoint = wasabiEndpoint.startsWith('http') ? wasabiEndpoint : `https://${wasabiEndpoint}`;
+    const region = process.env.WASABI_REGION || process.env.AWS_REGION || 'ap-south-1';
+    const accessKeyId = process.env.WASABI_KEY || process.env.AWS_ACCESS_KEY_ID;
+    const secretAccessKey = process.env.WASABI_SECRET || process.env.AWS_SECRET_ACCESS_KEY;
+
+    // Debug: Log which credentials are being used (masked)
+    console.log('[Worker] S3 Config:', {
+        endpoint,
+        region,
+        accessKeyId: accessKeyId ? `${accessKeyId.substring(0, 4)}...${accessKeyId.substring(accessKeyId.length - 4)}` : 'MISSING',
+        hasSecret: !!secretAccessKey
+    });
 
     return new S3Client({
-        region: process.env.WASABI_REGION || process.env.AWS_REGION || 'ap-south-1',
+        region,
         endpoint,
         credentials: {
-            accessKeyId: process.env.WASABI_KEY || process.env.AWS_ACCESS_KEY_ID,
-            secretAccessKey: process.env.WASABI_SECRET || process.env.AWS_SECRET_ACCESS_KEY
+            accessKeyId,
+            secretAccessKey
         },
         forcePathStyle: true
     });
