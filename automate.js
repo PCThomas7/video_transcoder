@@ -2,7 +2,8 @@ import express from "express";
 import axios from "axios";
 import fs from "fs";
 import path from "path";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
 import crypto from "crypto";
@@ -43,6 +44,12 @@ const s3 = new S3Client({
 const BUCKET = process.env.WASABI_BUCKET;
 const redis = new IORedis(process.env.REDIS_URL || "redis://127.0.0.1:6379");
 const transcodeQueue = new Queue("video-transcode", { connection: redis });
+
+// Helper: Generate pre-signed URL for S3 object (expires in 24 hours by default)
+const generatePresignedUrl = async (key, expiresIn = 86400) => {
+    const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
+    return await getSignedUrl(s3, command, { expiresIn });
+};
 
 // ====== HELPERS ======
 function omeHeaders() {
@@ -248,12 +255,16 @@ app.post("/ome/admission", async (req, res) => {
             // Use existing lessonId from context if available, otherwise use streamName
             const effectiveLessonId = lessonId || streamName;
 
-            // Create/Update Lesson with Raw URL
+            // Create/Update Lesson with Raw URL (using pre-signed URL for private bucket access)
             try {
+                // Generate pre-signed URL for raw video (expires in 7 days)
+                const presignedVideoUrl = await generatePresignedUrl(key, 7 * 24 * 60 * 60);
+
                 await LessonTranscode.findOneAndUpdate(
                     { lessonId: effectiveLessonId },
                     {
-                        videoUrl: `https://${BUCKET}.s3.${process.env.WASABI_REGION || 'ap-south-1'}.wasabisys.com/${key}`,
+                        videoUrl: presignedVideoUrl,
+                        rawVideoKey: key, // Store the key for regenerating URLs later
                         transcodingStatus: 'pending' // Ready for transcoding
                     },
                     { upsert: true }

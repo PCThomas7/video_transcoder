@@ -28,15 +28,12 @@ const loadEnv = async () => {
 };
 
 // S3 Client configuration
-// Helper to strip quotes from env values (some .env parsers include them)
-const cleanEnv = (val) => val ? val.replace(/^["']|["']$/g, '') : val;
-
 const createS3Client = () => {
-    const wasabiEndpoint = cleanEnv(process.env.WASABI_ENDPOINT) || 's3.ap-south-1.wasabisys.com';
+    const wasabiEndpoint = process.env.WASABI_ENDPOINT || 's3.ap-south-1.wasabisys.com';
     const endpoint = wasabiEndpoint.startsWith('http') ? wasabiEndpoint : `https://${wasabiEndpoint}`;
-    const region = cleanEnv(process.env.WASABI_REGION) || cleanEnv(process.env.AWS_REGION) || 'ap-south-1';
-    const accessKeyId = cleanEnv(process.env.WASABI_KEY) || cleanEnv(process.env.AWS_ACCESS_KEY_ID);
-    const secretAccessKey = cleanEnv(process.env.WASABI_SECRET) || cleanEnv(process.env.AWS_SECRET_ACCESS_KEY);
+    const region = process.env.WASABI_REGION || process.env.AWS_REGION || 'ap-south-1';
+    const accessKeyId = process.env.WASABI_KEY || process.env.AWS_ACCESS_KEY_ID;
+    const secretAccessKey = process.env.WASABI_SECRET || process.env.AWS_SECRET_ACCESS_KEY;
 
     // Debug: Log which credentials are being used (masked)
     console.log('[Worker] S3 Config:', {
@@ -210,7 +207,7 @@ const processJob = async (job) => {
                 port: parseInt(process.env.REDIS_PORT) || 6379,
                 password: process.env.REDIS_PASSWORD || undefined,
             });
-            const queue = new Queue('transcode', { connection: redisConnection });
+            const queue = new Queue('video-transcode', { connection: redisConnection });
 
             const newJobId = uuid();
             await Job.create({

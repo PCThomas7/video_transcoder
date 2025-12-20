@@ -12,7 +12,10 @@ const LessonTranscodeSchema = new mongoose.Schema({
         default: 'Untitled Lesson'
     },
     videoUrl: {
-        type: String // Raw MP4 URL
+        type: String // Raw MP4 URL (pre-signed, may expire)
+    },
+    rawVideoKey: {
+        type: String // S3 key for regenerating pre-signed URLs
     },
     hlsUrl: {
         type: String // HLS Master Playlist URL
