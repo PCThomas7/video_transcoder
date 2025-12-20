@@ -1,4 +1,4 @@
-import { Worker } from 'bullmq';
+import { Worker, Queue } from 'bullmq';
 import IORedis from 'ioredis';
 import mongoose from 'mongoose';
 import path from 'path';
@@ -9,6 +9,7 @@ import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { S3Client } from '@aws-sdk/client-s3';
 import { transcodeVideo } from '../utils/ffmpeg.js';
 import Job from '../models/Job.js';
+import Lesson from '../models/Lesson.js';
 
 // Load environment variables (for standalone worker process)
 const loadEnv = async () => {
@@ -81,11 +82,11 @@ const uploadFolderToS3 = async (s3Client, bucket, localDir, s3Prefix) => {
 
 // Process a single transcode job
 const processJob = async (job) => {
-    const { jobId, rawVideoKey, originalFileName } = job.data;
+    const { jobId, rawVideoKey, originalFileName, lessonId, transcodeType = 'full' } = job.data;
     let tempDir = null;
     let tempVideoPath = null;
 
-    console.log(`[Worker] Processing job ${jobId}`);
+    console.log(`[Worker] Processing job ${jobId} (Type: ${transcodeType})`);
 
     const s3Client = createS3Client();
     const bucket = process.env.AWS_S3_BUCKET_NAME;
@@ -96,6 +97,12 @@ const processJob = async (job) => {
             { jobId },
             { status: 'processing', startedAt: new Date() }
         );
+
+        if (lessonId && transcodeType === 'fast') {
+            await Lesson.findOneAndUpdate({ lessonId }, { transcodingStatus: 'processing_low' });
+        } else if (lessonId && (transcodeType === 'full' || transcodeType === 'full_remaining')) {
+            await Lesson.findOneAndUpdate({ lessonId }, { transcodingStatus: 'processing_high' });
+        }
 
         // Create temp directory
         tempDir = path.join(os.tmpdir(), `transcode-${uuid()}`);
@@ -112,8 +119,25 @@ const processJob = async (job) => {
         console.log(`[Worker] Transcoding video...`);
         await job.updateProgress(10);
 
+        // Determine resolutions based on type
+        let targetResolutions;
+        let playlistResolutions;
+
+        if (transcodeType === 'fast') {
+            targetResolutions = ['360p'];
+            playlistResolutions = ['360p'];
+        } else if (transcodeType === 'full_remaining') {
+            targetResolutions = ['480p', '720p', '1080p'];
+            playlistResolutions = ['360p', '480p', '720p', '1080p'];
+        } else {
+            // Default full
+            targetResolutions = ['360p', '480p', '720p', '1080p'];
+            playlistResolutions = ['360p', '480p', '720p', '1080p'];
+        }
+
         // Transcode video
-        await transcodeVideo(tempVideoPath, tempDir);
+        // Pass options to transcodeVideo
+        await transcodeVideo(tempVideoPath, tempDir, { targetResolutions, playlistResolutions });
         await job.updateProgress(70);
 
         // Upload transcoded files to S3
@@ -126,6 +150,19 @@ const processJob = async (job) => {
         const baseUrl = process.env.API_BASE_URL || 'http://localhost:2000';
         const hlsStreamUrl = `${baseUrl}/api/upload/hls/${hlsPrefix}/master.m3u8`;
 
+        // Update Lesson if exists
+        if (lessonId) {
+            const lessonUpdate = { hlsUrl: hlsStreamUrl };
+            if (transcodeType === 'full' || transcodeType === 'full_remaining') {
+                lessonUpdate.transcodingStatus = 'completed';
+            }
+            // For 'fast', we stay in 'processing_low' or maybe 'processing_high' if we consider it "live" but improving?
+            // Actually, if 'fast' is done, user can watch.
+            // Let's set to 'processing_low' done?
+            // The plan said: "Fast Transcode (Low Quality / 360p) first, updates the Lesson with this HLS URL for immediate playback."
+            await Lesson.findOneAndUpdate({ lessonId }, lessonUpdate);
+        }
+
         // Update job as completed
         await Job.findOneAndUpdate(
             { jobId },
@@ -134,17 +171,40 @@ const processJob = async (job) => {
                 progress: 100,
                 completedAt: new Date(),
                 hlsPrefix,
-                hlsStreamUrl,
-                resolutions: {
-                    '360p': { status: 'completed', progress: 100 },
-                    '480p': { status: 'completed', progress: 100 },
-                    '720p': { status: 'completed', progress: 100 },
-                    '1080p': { status: 'completed', progress: 100 }
-                }
+                hlsStreamUrl
             }
         );
 
         console.log(`[Worker] Job ${jobId} completed successfully`);
+
+        // If FAST phase completed, enqueue FULL phase
+        if (transcodeType === 'fast') {
+            console.log('[Worker] Enqueueing full quality transcode job...');
+            const redisConnection = new IORedis({
+                host: process.env.REDIS_HOST || 'localhost',
+                port: parseInt(process.env.REDIS_PORT) || 6379,
+                password: process.env.REDIS_PASSWORD || undefined,
+            });
+            const queue = new Queue('transcode', { connection: redisConnection });
+
+            const newJobId = uuid();
+            await Job.create({
+                jobId: newJobId,
+                originalFileName,
+                rawVideoKey,
+                status: 'queued',
+                resolutions: { // simplistic init
+                    '480p': { status: 'pending' }, '720p': { status: 'pending' }, '1080p': { status: 'pending' }
+                }
+            });
+
+            await queue.add('transcode', {
+                ...job.data,
+                jobId: newJobId,
+                transcodeType: 'full_remaining'
+            });
+            await queue.close(); // Important: close local queue connection or it keeps process alive/leaks
+        }
 
         return { success: true, hlsStreamUrl };
 
@@ -165,6 +225,10 @@ const processJob = async (job) => {
                 }
             }
         );
+
+        if (lessonId) {
+            await Lesson.findOneAndUpdate({ lessonId }, { transcodingStatus: 'failed' });
+        }
 
         throw error;
 

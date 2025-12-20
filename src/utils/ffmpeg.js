@@ -5,7 +5,7 @@ import fs from 'fs/promises';
 
 const execFileAsync = promisify(execFile);
 
-export const transcodeVideo = async (inputPath, outputDir) => {
+export const transcodeVideo = async (inputPath, outputDir, options = {}) => {
     const resolutions = {
         '360p': { width: 640, height: 360, bitrate: '800k', audioBitrate: '96k' },
         '480p': { width: 854, height: 480, bitrate: '1400k', audioBitrate: '128k' },
@@ -13,8 +13,14 @@ export const transcodeVideo = async (inputPath, outputDir) => {
         '1080p': { width: 1920, height: 1080, bitrate: '5000k', audioBitrate: '192k' },
     };
 
+    const targetResolutions = options.targetResolutions || Object.keys(resolutions);
+    const playlistResolutions = options.playlistResolutions || Object.keys(resolutions);
+
     // Run ffmpeg sequentially per resolution to avoid overloading the host.
-    for (const [resolution, opts] of Object.entries(resolutions)) {
+    for (const resolution of targetResolutions) {
+        const opts = resolutions[resolution];
+        if (!opts) continue;
+
         const resDir = path.join(outputDir, resolution);
         await fs.mkdir(resDir, { recursive: true });
         const playlistPath = path.join(resDir, 'index.m3u8');
@@ -25,14 +31,14 @@ export const transcodeVideo = async (inputPath, outputDir) => {
             '-i', inputPath,
             '-vf', `scale=w=${opts.width}:h=${opts.height}`,
             '-c:v', 'libx264',
-            '-preset', 'fast', // Faster encoding (options: ultrafast, superfast, veryfast, faster, fast, medium)
+            '-preset', 'fast', // Faster encoding
             '-b:v', opts.bitrate,
             '-maxrate', opts.bitrate, // Constrain max bitrate
             '-bufsize', `${parseInt(opts.bitrate) * 2}k`, // Buffer size = 2x bitrate
             '-c:a', 'aac',
             '-b:a', opts.audioBitrate,
             '-f', 'hls',
-            '-hls_time', '4', // 4-second segments (was 15) - faster initial load
+            '-hls_time', '4', // 4-second segments
             '-hls_list_size', '0', // Include all segments in playlist
             '-hls_playlist_type', 'vod',
             '-hls_segment_filename', segmentPattern,
@@ -53,7 +59,10 @@ export const transcodeVideo = async (inputPath, outputDir) => {
     // Create master playlist
     let masterPlaylistContent = '#EXTM3U\n#EXT-X-VERSION:3\n';
 
-    for (const [resolution, opts] of Object.entries(resolutions)) {
+    for (const resolution of playlistResolutions) {
+        const opts = resolutions[resolution];
+        if (!opts) continue;
+
         const bandwidth = parseInt(opts.bitrate.replace('k', '')) * 1000;
         masterPlaylistContent += `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${opts.width}x${opts.height}\n`;
         masterPlaylistContent += `${resolution}/index.m3u8\n`;
