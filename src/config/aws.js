@@ -1,14 +1,18 @@
 import AWS from 'aws-sdk';
 
 const s3Config = {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    region: process.env.AWS_REGION,
-    endpoint: process.env.WASABI_ENDPOINT || 's3.us-east-1.wasabisys.com', // Wasabi endpoint
+    accessKeyId: process.env.WASABI_KEY || process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.WASABI_SECRET || process.env.AWS_SECRET_ACCESS_KEY,
+    region: process.env.WASABI_REGION || process.env.AWS_REGION || 'ap-south-1',
+    endpoint: process.env.WASABI_ENDPOINT || 's3.ap-south-1.wasabisys.com', // Wasabi endpoint
     s3ForcePathStyle: true,
 };
 
-console.log('S3 Config:', s3Config); // Debugging line to check config values
+console.log('S3 Config:', {
+    ...s3Config,
+    accessKeyId: s3Config.accessKeyId ? `${s3Config.accessKeyId.substring(0, 4)}...` : 'MISSING',
+    secretAccessKey: s3Config.secretAccessKey ? '***' : 'MISSING'
+});
 
 AWS.config.update(s3Config);
 
