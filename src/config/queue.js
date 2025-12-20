@@ -86,7 +86,12 @@ export const initQueueEvents = async () => {
     queueEvents.on('completed', async ({ jobId, returnvalue }) => {
         console.log(`[Queue] Job ${jobId} completed`);
         try {
-            const result = JSON.parse(returnvalue || '{}');
+            // Handle returnvalue that could be string, object, or undefined
+            let result = {};
+            if (returnvalue) {
+                result = typeof returnvalue === 'string' ? JSON.parse(returnvalue) : returnvalue;
+            }
+            console.log(`[Queue] Job ${jobId} completed with result:`, result);
             await Job.findOneAndUpdate(
                 { jobId },
                 {
@@ -97,7 +102,7 @@ export const initQueueEvents = async () => {
                 }
             );
         } catch (err) {
-            console.error(`[Queue] Failed to update job ${jobId} to completed:`, err.message);
+            console.error(`[Queue] Failed to update job ${jobId} to completed:`, err.message, err);
         }
     });
 
