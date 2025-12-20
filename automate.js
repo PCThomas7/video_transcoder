@@ -288,6 +288,7 @@ app.post("/ome/admission", async (req, res) => {
                 lessonId: effectiveLessonId,
                 streamName,
                 originalFileName: path.basename(localVideo),
+                localFilePath: localVideo, // Local path for direct transcoding
                 rawVideoKey: key,
                 transcodeType: "fast", // <--- Trigger Fast Transcode
                 input: s3ref,

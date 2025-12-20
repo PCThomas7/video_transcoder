@@ -87,9 +87,9 @@ const uploadFolderToS3 = async (s3Client, bucket, localDir, s3Prefix) => {
 
 // Process a single transcode job
 const processJob = async (job) => {
-    const { jobId, rawVideoKey, originalFileName, lessonId, transcodeType = 'full' } = job.data;
+    const { jobId, rawVideoKey, originalFileName, lessonId, transcodeType = 'full', localFilePath } = job.data;
     let tempDir = null;
-    let tempVideoPath = null;
+    let inputVideoPath = null;
 
     console.log(`[Worker] Processing job ${jobId} (Type: ${transcodeType})`);
 
@@ -109,17 +109,23 @@ const processJob = async (job) => {
             await LessonTranscode.findOneAndUpdate({ lessonId }, { transcodingStatus: 'processing_high' });
         }
 
-        // Create temp directory
+        // Create temp directory for output
         tempDir = path.join(os.tmpdir(), `transcode-${uuid()}`);
         await fs.mkdir(tempDir, { recursive: true });
 
-        // Download raw video from S3
-        const ext = path.extname(originalFileName);
-        tempVideoPath = path.join(tempDir, `input${ext}`);
+        // Use local file if available (streaming recordings), otherwise download from S3
+        if (localFilePath) {
+            console.log(`[Worker] Using local file: ${localFilePath}`);
+            inputVideoPath = localFilePath;
+        } else {
+            // Fallback: Download from S3 (for API uploads)
+            const ext = path.extname(originalFileName);
+            inputVideoPath = path.join(tempDir, `input${ext}`);
+            console.log(`[Worker] Downloading ${rawVideoKey} from S3...`);
+            await downloadFromS3(s3Client, bucket, rawVideoKey, inputVideoPath);
+        }
 
-        console.log(`[Worker] Downloading ${rawVideoKey} from S3...`);
         await job.updateProgress(5);
-        await downloadFromS3(s3Client, bucket, rawVideoKey, tempVideoPath);
 
         console.log(`[Worker] Transcoding video...`);
         await job.updateProgress(10);
@@ -142,7 +148,7 @@ const processJob = async (job) => {
 
         // Transcode video
         // Pass options to transcodeVideo
-        await transcodeVideo(tempVideoPath, tempDir, { targetResolutions, playlistResolutions });
+        await transcodeVideo(inputVideoPath, tempDir, { targetResolutions, playlistResolutions });
         await job.updateProgress(70);
 
         // Upload transcoded files to S3
