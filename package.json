@@ -5,10 +5,12 @@
   "description": "A video transcoder project that uploads videos to AWS S3 and processes them.",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node --env-file=.env src/index.js",
     "dev": "nodemon --env-file=.env src/index.js",
     "worker": "node --env-file=.env src/workers/transcodeWorker.js",
-    "worker:dev": "nodemon --env-file=.env src/workers/transcodeWorker.js"
+    "worker:dev": "nodemon --env-file=.env src/workers/transcodeWorker.js",
+    "webhook": "node --env-file=.env automate.js",
+    "webhook:dev": "nodemon --env-file=.env automate.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.520.0",
