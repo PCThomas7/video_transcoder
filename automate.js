@@ -253,7 +253,7 @@ app.post("/ome/admission", async (req, res) => {
                 await LessonTranscode.findOneAndUpdate(
                     { lessonId: effectiveLessonId },
                     {
-                        videoUrl: `https://${BUCKET}.s3.${s3.config.region}.wasabisys.com/${key}`,
+                        videoUrl: `https://${BUCKET}.s3.${process.env.WASABI_REGION || 'ap-south-1'}.wasabisys.com/${key}`,
                         transcodingStatus: 'pending' // Ready for transcoding
                     },
                     { upsert: true }

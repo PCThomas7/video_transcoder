@@ -28,15 +28,20 @@ const loadEnv = async () => {
 };
 
 // S3 Client configuration
-const createS3Client = () => new S3Client({
-    region: process.env.AWS_REGION || 'us-east-1',
-    endpoint: process.env.WASABI_ENDPOINT ? `https://${process.env.WASABI_ENDPOINT}` : undefined,
-    credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-    },
-    forcePathStyle: true
-});
+const createS3Client = () => {
+    const wasabiEndpoint = process.env.WASABI_ENDPOINT || 's3.ap-south-1.wasabisys.com';
+    const endpoint = wasabiEndpoint.startsWith('http') ? wasabiEndpoint : `https://${wasabiEndpoint}`;
+
+    return new S3Client({
+        region: process.env.WASABI_REGION || process.env.AWS_REGION || 'ap-south-1',
+        endpoint,
+        credentials: {
+            accessKeyId: process.env.WASABI_KEY || process.env.AWS_ACCESS_KEY_ID,
+            secretAccessKey: process.env.WASABI_SECRET || process.env.AWS_SECRET_ACCESS_KEY
+        },
+        forcePathStyle: true
+    });
+};
 
 // Content type helper
 const getContentType = (filePath) => {
@@ -89,7 +94,7 @@ const processJob = async (job) => {
     console.log(`[Worker] Processing job ${jobId} (Type: ${transcodeType})`);
 
     const s3Client = createS3Client();
-    const bucket = process.env.AWS_S3_BUCKET_NAME;
+    const bucket = process.env.WASABI_BUCKET || process.env.AWS_S3_BUCKET_NAME;
 
     try {
         // Update job status to processing
