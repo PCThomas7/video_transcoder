@@ -200,8 +200,8 @@ class UploadController {
      */
     async proxyHlsMaster(req, res) {
         try {
-            const { streamId = "streamaaa", videoId } = req.params;
-            const key = `recordings/default/app/${streamId}/${videoId}/master.m3u8`;
+            const { courseId = "streamaaa", videoId } = req.params;
+            const key = `recordings/${courseId}/${videoId}/master.m3u8`;
             console.log(key);
 
             const params = {

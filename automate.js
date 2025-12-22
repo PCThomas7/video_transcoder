@@ -197,17 +197,28 @@ app.post("/ome/admission", async (req, res) => {
 
         const streamName = request.url.split('rtmp://72.60.221.204:1935/app/')[1];
         console.log(streamName);
+        const lessonId = streamName.split('_')[1];
+        console.log(lessonId);
+        const { courseId } = await axios.get(`${process.env.BACKEND_URL}/api/lessons/webhook/${lessonId}`, {
+            body: {
+                "SECRET_KEY": process.env.SECRET_KEY
+            },
+            headers: {
+                "Content-Type": "application/json"
+            }
+        });
+        console.log(courseId);
         if (!streamName) return;
-
         // ====== ON OPENING: start recording + save recordId ======
         if (request.status === "opening") {
             // start record and store in redis
             console.log("connect open");
             const recordId = await omeStartRecord(streamName);
             console.log("record id", recordId);
+            // 
             await redis.set(
                 `live:${streamName}`,
-                JSON.stringify({ recordId, lessonId: null }),
+                JSON.stringify({ recordId, lessonId, courseId }),
                 "EX",
                 60 * 60 * 6 // keep up to 6 hours
             );
@@ -226,7 +237,7 @@ app.post("/ome/admission", async (req, res) => {
                 return;
             }
 
-            const { recordId, lessonId } = ctx;
+            const { recordId, lessonId, courseId } = ctx;
 
             await omeStopRecord(recordId);
             await waitUntilStopped(recordId);
@@ -248,7 +259,7 @@ app.post("/ome/admission", async (req, res) => {
             const localVideo = await waitForFile(streamFolder);
             if (!localVideo) throw new Error(`No mp4/ts found in ${streamFolder} after waiting`);
 
-            const key = `recordings/${streamName}/${path.basename(localVideo)}`;
+            const key = `recordings/${courseId}/${lessonId}/${path.basename(localVideo)}`;
             const s3ref = await uploadToWasabi(localVideo, key);
 
             // Update Lesson with Raw Video URL
@@ -269,6 +280,19 @@ app.post("/ome/admission", async (req, res) => {
                     },
                     { upsert: true }
                 );
+                // add lesson update hook
+                // axios.post(`${process.env.BACKEND_URL}/api/lessons/webhook/${lessonId}`, {
+                //     body: {
+                //         "SECRET_KEY": process.env.SECRET_KEY,
+                //         "lessonId": lessonId,
+                //         "courseId": courseId,
+                //         "status": "transcoding",
+                //         "rawVideoUrl": presignedVideoUrl
+                //     },
+                //     headers: {
+                //         "Content-Type": "application/json"
+                //     }
+                // });
             } catch (err) {
                 console.error("Failed to update Lesson model:", err);
             }
@@ -294,7 +318,7 @@ app.post("/ome/admission", async (req, res) => {
                 console.error("Failed to create Job record:", err);
             }
 
-            await transcodeQueue.add("transcode", {
+            await transcodeQueue.add("video-transcode", {
                 jobId,
                 lessonId: effectiveLessonId,
                 streamName,

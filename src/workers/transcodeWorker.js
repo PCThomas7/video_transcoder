@@ -220,7 +220,7 @@ const processJob = async (job) => {
                 }
             });
 
-            await queue.add('transcode', {
+            await queue.add('video-transcode', {
                 ...job.data,
                 jobId: newJobId,
                 transcodeType: 'full_remaining'
