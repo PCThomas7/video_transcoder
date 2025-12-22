@@ -167,8 +167,8 @@ class UploadController {
      */
     async proxyHlsPlaylist(req, res) {
         try {
-            const { videoId, quality } = req.params;
-            const key = `${videoId}/${quality}/index.m3u8`;
+            const { streamId = "streamaaa", videoId, quality } = req.params;
+            const key = `recordings/default/app/${streamId}/${videoId}/${quality}/index.m3u8`;
 
             const params = {
                 Bucket: process.env.AWS_S3_BUCKET_NAME,
@@ -183,7 +183,7 @@ class UploadController {
             const baseUrl = `${req.protocol}://${req.get('host')}`;
             playlistContent = playlistContent.replace(
                 /^(segment\d+\.ts)$/gm,
-                `${baseUrl}/api/upload/hls/${videoId}/${quality}/$1`
+                `${baseUrl}/api/upload/hls/${streamId}/${videoId}/${quality}/$1`
             );
 
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
@@ -200,8 +200,9 @@ class UploadController {
      */
     async proxyHlsMaster(req, res) {
         try {
-            const { videoId } = req.params;
-            const key = `${videoId}/master.m3u8`;
+            const { streamId = "streamaaa", videoId } = req.params;
+            const key = `recordings/default/app/${streamId}/${videoId}/master.m3u8`;
+            console.log(key);
 
             const params = {
                 Bucket: process.env.AWS_S3_BUCKET_NAME,
@@ -218,7 +219,7 @@ class UploadController {
 
             playlistContent = playlistContent.replace(
                 /^(\d+p)\/index\.m3u8$/gm,
-                `${baseUrl}/api/upload/hls/${videoId}/$1/playlist.m3u8`
+                `${baseUrl}/api/upload/hls/${streamId}/${videoId}/$1/playlist.m3u8`
             );
 
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
@@ -236,8 +237,9 @@ class UploadController {
      */
     async proxyHlsSegment(req, res) {
         try {
-            const { videoId, quality, segment } = req.params;
-            const key = `${videoId}/${quality}/${segment}`;
+            const { streamId = "streamaaa", videoId, quality, segment } = req.params;
+            const key = `recordings/default/app/${streamId}/${videoId}/${quality}/${segment}`;
+            console.log(key);
 
             const params = {
                 Bucket: process.env.AWS_S3_BUCKET_NAME,

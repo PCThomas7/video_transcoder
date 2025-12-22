@@ -248,7 +248,7 @@ app.post("/ome/admission", async (req, res) => {
             const localVideo = await waitForFile(streamFolder);
             if (!localVideo) throw new Error(`No mp4/ts found in ${streamFolder} after waiting`);
 
-            const key = `recordings/${VHOST}/${APPNAME}/${streamName}/${path.basename(localVideo)}`;
+            const key = `recordings/${streamName}/${path.basename(localVideo)}`;
             const s3ref = await uploadToWasabi(localVideo, key);
 
             // Update Lesson with Raw Video URL
