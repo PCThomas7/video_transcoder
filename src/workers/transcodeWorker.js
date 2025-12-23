@@ -195,7 +195,7 @@ const processJob = async (job) => {
                     await axios.post(`${process.env.BACKEND_URL}/api/lessons/webhook/update-video`, {
                         lessonId,
                         hlsUrl: hlsStreamUrl,
-                        SECERT_KEY: process.env.SECRET_KEY
+                        SECRET_KEY: process.env.SECRET_KEY
                     });
                     console.log(`[Worker] Webhook sent successfully for ${lessonId}`);
                 } catch (err) {

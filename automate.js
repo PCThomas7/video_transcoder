@@ -199,10 +199,9 @@ app.post("/ome/admission", async (req, res) => {
         console.log(streamName);
         const lessonId = streamName.split('_')[1];
         console.log(lessonId);
-        const { courseId } = await axios.get(`${process.env.BACKEND_URL}/api/lessons/webhook/${lessonId}`, {
-            body: {
-                "SECRET_KEY": process.env.SECRET_KEY
-            },
+        const { data: { courseId } } = await axios.post(`${process.env.BACKEND_URL}/api/lessons/webhook/${lessonId}`, {
+            "SECRET_KEY": process.env.SECRET_KEY
+        }, {
             headers: {
                 "Content-Type": "application/json"
             }
@@ -286,7 +285,7 @@ app.post("/ome/admission", async (req, res) => {
                     await axios.post(`${process.env.BACKEND_URL}/api/lessons/webhook/update-video`, {
                         lessonId: effectiveLessonId,
                         videoUrl: presignedVideoUrl,
-                        SECERT_KEY: process.env.SECRET_KEY
+                        SECRET_KEY: process.env.SECRET_KEY
                     });
                 } catch (err) {
                     console.error("[Automate] Webhook failed:", err.message);
