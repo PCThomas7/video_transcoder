@@ -165,6 +165,8 @@ const processJob = async (job) => {
         // Upload transcoded files to S3
         const hlsPrefix = rawVideoKey.replace('raw-videos/', '').replace(/\.[^/.]+$/, '');
         console.log(`[Worker] Uploading HLS files to ${hlsPrefix}...`);
+        // remove /recordings/ from hlsPrefix
+        hlsPrefix.replace('/recordings/', '');
         await uploadFolderToS3(s3Client, bucket, tempDir, hlsPrefix);
         await job.updateProgress(95);
 

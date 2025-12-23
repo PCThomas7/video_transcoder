@@ -63,22 +63,22 @@ router.post('/upload-transcode',
 // ============================================
 
 // Get the HLS master playlist
-router.get('/hls/:streamId/:videoId/master.m3u8',
+router.get('/hls/:courseId/:lessonId/:videoId/master.m3u8',
     uploadController.proxyHlsMaster.bind(uploadController)
 );
 
 // Get the HLS playlist (rewrites segment URLs to point to our proxy)
-router.get('/hls/:streamId/:videoId/:quality/playlist.m3u8',
+router.get('/hls/:courseId/:lessonId/:videoId/:quality/playlist.m3u8',
     uploadController.proxyHlsPlaylist.bind(uploadController)
 );
 
 // Get individual HLS segments
-router.get('/hls/:streamId/:videoId/:quality/:segment',
+router.get('/hls/:courseId/:lessonId/:videoId/:quality/:segment',
     uploadController.proxyHlsSegment.bind(uploadController)
 );
 
 // Get a streaming URL for a video
-router.get('/stream/:videoId/:quality?',
+router.get('/stream/:courseId/:lessonId/:videoId/:quality?',
     uploadController.getStreamUrl.bind(uploadController)
 );
 

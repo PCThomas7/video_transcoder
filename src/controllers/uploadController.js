@@ -167,8 +167,8 @@ class UploadController {
      */
     async proxyHlsPlaylist(req, res) {
         try {
-            const { streamId = "streamaaa", videoId, quality } = req.params;
-            const key = `recordings/default/app/${streamId}/${videoId}/${quality}/index.m3u8`;
+            const { courseId = "streamaaa", lessonId, videoId, quality } = req.params;
+            const key = `recordings/${courseId}/${lessonId}/${videoId}/${quality}/index.m3u8`;
 
             const params = {
                 Bucket: process.env.AWS_S3_BUCKET_NAME,
@@ -183,7 +183,7 @@ class UploadController {
             const baseUrl = `${req.protocol}://${req.get('host')}`;
             playlistContent = playlistContent.replace(
                 /^(segment\d+\.ts)$/gm,
-                `${baseUrl}/api/upload/hls/${streamId}/${videoId}/${quality}/$1`
+                `${baseUrl}/api/upload/hls/${courseId}/${lessonId}/${videoId}/${quality}/$1`
             );
 
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
@@ -200,8 +200,8 @@ class UploadController {
      */
     async proxyHlsMaster(req, res) {
         try {
-            const { courseId = "streamaaa", videoId } = req.params;
-            const key = `recordings/${courseId}/${videoId}/master.m3u8`;
+            const { courseId = "streamaaa", lessonId, videoId } = req.params;
+            const key = `recordings/${courseId}/${lessonId}/${videoId}/master.m3u8`;
             console.log(key);
 
             const params = {
@@ -219,7 +219,7 @@ class UploadController {
 
             playlistContent = playlistContent.replace(
                 /^(\d+p)\/index\.m3u8$/gm,
-                `${baseUrl}/api/upload/hls/${streamId}/${videoId}/$1/playlist.m3u8`
+                `${baseUrl}/api/upload/hls/${courseId}/${lessonId}/${videoId}/$1/playlist.m3u8`
             );
 
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
@@ -237,8 +237,8 @@ class UploadController {
      */
     async proxyHlsSegment(req, res) {
         try {
-            const { streamId = "streamaaa", videoId, quality, segment } = req.params;
-            const key = `recordings/default/app/${streamId}/${videoId}/${quality}/${segment}`;
+            const { courseId = "streamaaa", lessonId, videoId, quality, segment } = req.params;
+            const key = `recordings/${courseId}/${lessonId}/${videoId}/${quality}/${segment}`;
             console.log(key);
 
             const params = {
@@ -283,14 +283,14 @@ class UploadController {
      */
     async getStreamUrl(req, res) {
         try {
-            const { videoId, quality } = req.params;
+            const { courseId = "streamaaa", lessonId, videoId, quality } = req.params;
             const baseUrl = `${req.protocol}://${req.get('host')}`;
             // Return master playlist by default if no quality specified, otherwise specific quality
             let proxyUrl;
             if (quality) {
-                proxyUrl = `${baseUrl}/api/upload/hls/${videoId}/${quality}/playlist.m3u8`;
+                proxyUrl = `${baseUrl}/api/upload/hls/${courseId}/${lessonId}/${videoId}/${quality}/playlist.m3u8`;
             } else {
-                proxyUrl = `${baseUrl}/api/upload/hls/${videoId}/master.m3u8`;
+                proxyUrl = `${baseUrl}/api/upload/hls/${courseId}/${lessonId}/${videoId}/master.m3u8`;
             }
 
             return res.status(200).json({
