@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { Worker, Queue } from 'bullmq';
 import IORedis from 'ioredis';
 import mongoose from 'mongoose';
@@ -185,6 +186,22 @@ const processJob = async (job) => {
             // Let's set to 'processing_low' done?
             // The plan said: "Fast Transcode (Low Quality / 360p) first, updates the Lesson with this HLS URL for immediate playback."
             await LessonTranscode.findOneAndUpdate({ lessonId }, lessonUpdate);
+
+            // Call backend webhook to update Lesson content with HLS URL
+            // Call backend webhook to update Lesson content with HLS URL
+            if (hlsStreamUrl) {
+                try {
+                    console.log(`[Worker] Calling webhook to update lesson ${lessonId} with HLS URL`);
+                    await axios.post(`${process.env.BACKEND_URL}/api/lessons/webhook/update-video`, {
+                        lessonId,
+                        hlsUrl: hlsStreamUrl,
+                        SECERT_KEY: process.env.SECRET_KEY
+                    });
+                    console.log(`[Worker] Webhook sent successfully for ${lessonId}`);
+                } catch (err) {
+                    console.error('[Worker] Failed to send update webhook:', err.message);
+                }
+            }
         }
 
         // Update job as completed

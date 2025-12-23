@@ -280,19 +280,17 @@ app.post("/ome/admission", async (req, res) => {
                     },
                     { upsert: true }
                 );
-                // add lesson update hook
-                // axios.post(`${process.env.BACKEND_URL}/api/lessons/webhook/${lessonId}`, {
-                //     body: {
-                //         "SECRET_KEY": process.env.SECRET_KEY,
-                //         "lessonId": lessonId,
-                //         "courseId": courseId,
-                //         "status": "transcoding",
-                //         "rawVideoUrl": presignedVideoUrl
-                //     },
-                //     headers: {
-                //         "Content-Type": "application/json"
-                //     }
-                // });
+                // Add lesson update hook
+                try {
+                    console.log(`[Automate] Calling webhook for lesson ${effectiveLessonId}`);
+                    await axios.post(`${process.env.BACKEND_URL}/api/lessons/webhook/update-video`, {
+                        lessonId: effectiveLessonId,
+                        videoUrl: presignedVideoUrl,
+                        SECERT_KEY: process.env.SECRET_KEY
+                    });
+                } catch (err) {
+                    console.error("[Automate] Webhook failed:", err.message);
+                }
             } catch (err) {
                 console.error("Failed to update Lesson model:", err);
             }
