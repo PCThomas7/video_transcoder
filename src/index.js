@@ -5,6 +5,7 @@ import { redisConnection, initQueueEvents } from './config/queue.js';
 import uploadRouter from './routes/upload.js';
 
 const app = express();
+app.set('trust proxy', true);
 const port = process.env.PORT || 2000;
 
 // Middleware

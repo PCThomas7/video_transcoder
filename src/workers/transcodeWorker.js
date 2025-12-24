@@ -173,7 +173,7 @@ const processJob = async (job) => {
 
         // Generate URLs
         const baseUrl = process.env.API_BASE_URL || 'http://localhost:2000';
-        const hlsStreamUrl = `${baseUrl}/api/upload/hls/${hlsPrefix}/master.m3u8`;
+        const hlsStreamUrl = `${baseUrl}/api/upload/hls/${hlsPrefix.replace('recordings/', '')}/master.m3u8`;
 
         // Update Lesson if exists
         if (lessonId) {
