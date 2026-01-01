@@ -336,8 +336,3 @@ const startWorker = async () => {
 startWorker().catch(console.error);
 
 export { processJob, startWorker };
-
-// Run worker if executed directly
-startWorker().catch(console.error);
-
-export { processJob, startWorker };
