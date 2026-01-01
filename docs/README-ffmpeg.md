@@ -91,14 +91,30 @@ const args = [
 | `-i inputPath` | Input video file |
 | `-vf scale=w:h` | Video filter to resize |
 | `-c:v libx264` | Use H.264 video codec (most compatible) |
-| `-b:v 800k` | Set video bitrate |
+| `-preset fast` | Encode faster (good balance of speed vs file size) |
+| `-b:v 800k` | Set target video bitrate |
+| `-maxrate 800k` | Maximum allowed bitrate |
+| `-bufsize 1600k` | Buffer size (usually 2x bitrate) |
 | `-c:a aac` | Use AAC audio codec (most compatible) |
 | `-b:a 96k` | Set audio bitrate |
 | `-f hls` | Output HLS format |
-| `-hls_time 15` | Each segment is 15 seconds |
+| `-hls_time 4` | **Crucial**: Each segment is 4 seconds. This allows for faster seeking and adaptation. |
+| `-hls_list_size 0` | Include ALL segments in the playlist (required for VOD) |
 | `-hls_playlist_type vod` | Optimized for Video on Demand |
 | `-hls_segment_filename` | Pattern for segment filenames |
 | `-start_number 0` | First segment is segment000.ts |
+
+---
+
+## ⚙️ The Options Argument
+
+The `transcodeVideo` function accepts an `options` object:
+
+1. **`targetResolutions`**: Which qualities to actually *transcode* right now.
+2. **`playlistResolutions`**: Which qualities to include in the *master.m3u8* file.
+
+**Example:**
+In "Fast Mode", we only transcode **360p**, but we might include other resolutions in the playlist so the player knows they are "coming soon".
 
 ---
 

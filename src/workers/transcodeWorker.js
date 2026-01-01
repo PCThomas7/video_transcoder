@@ -99,7 +99,7 @@ const uploadFolderToS3 = async (s3Client, bucket, localDir, s3Prefix) => {
 
 // Process a single transcode job
 const processJob = async (job) => {
-    const { jobId, rawVideoKey, originalFileName, lessonId, transcodeType = 'full', localFilePath } = job.data;
+    const { jobId, rawVideoKey, originalFileName, lessonId, transcodeType = 'fast', localFilePath } = job.data;
     let tempDir = null;
     let inputVideoPath = null;
 
@@ -117,7 +117,7 @@ const processJob = async (job) => {
 
         if (lessonId && transcodeType === 'fast') {
             await LessonTranscode.findOneAndUpdate({ lessonId }, { transcodingStatus: 'processing_low' });
-        } else if (lessonId && (transcodeType === 'full' || transcodeType === 'full_remaining')) {
+        } else if (lessonId && transcodeType === 'background') {
             await LessonTranscode.findOneAndUpdate({ lessonId }, { transcodingStatus: 'processing_high' });
         }
 
@@ -139,34 +139,40 @@ const processJob = async (job) => {
 
         await job.updateProgress(5);
 
-        console.log(`[Worker] Transcoding video...`);
+        console.log(`[Worker] Transcoding video (${transcodeType})...`);
         await job.updateProgress(10);
 
-        // Determine resolutions based on type
+        // Determine resolutions and performance settings based on type
         let targetResolutions;
         let playlistResolutions;
+        let cpuThreads;
+        let preset;
 
         if (transcodeType === 'fast') {
             targetResolutions = ['360p'];
             playlistResolutions = ['360p'];
-        } else if (transcodeType === 'full_remaining') {
+            cpuThreads = 0; // Use full CPU for fast burst
+            preset = 'ultrafast'; // Max speed for low latency
+        } else {
+            // Background / Full remaining
             targetResolutions = ['480p', '720p', '1080p'];
             playlistResolutions = ['360p', '480p', '720p', '1080p'];
-        } else {
-            // Default full
-            targetResolutions = ['360p', '480p', '720p', '1080p'];
-            playlistResolutions = ['360p', '480p', '720p', '1080p'];
+            cpuThreads = 2; // Restrict background to 2 cores
+            preset = 'medium'; // Better quality for final versions
         }
 
         // Transcode video
-        // Pass options to transcodeVideo
-        await transcodeVideo(inputVideoPath, tempDir, { targetResolutions, playlistResolutions });
+        await transcodeVideo(inputVideoPath, tempDir, {
+            targetResolutions,
+            playlistResolutions,
+            cpuThreads,
+            preset
+        });
         await job.updateProgress(70);
 
         // Upload transcoded files to S3
         const hlsPrefix = rawVideoKey.replace('raw-videos/', '').replace(/\.[^/.]+$/, '');
         console.log(`[Worker] Uploading HLS files to ${hlsPrefix}...`);
-        // remove /recordings/ from hlsPrefix
         hlsPrefix.replace('/recordings/', '');
         await uploadFolderToS3(s3Client, bucket, tempDir, hlsPrefix);
         await job.updateProgress(95);
@@ -178,17 +184,11 @@ const processJob = async (job) => {
         // Update Lesson if exists
         if (lessonId) {
             const lessonUpdate = { hlsUrl: hlsStreamUrl };
-            if (transcodeType === 'full' || transcodeType === 'full_remaining') {
+            if (transcodeType === 'background') {
                 lessonUpdate.transcodingStatus = 'completed';
             }
-            // For 'fast', we stay in 'processing_low' or maybe 'processing_high' if we consider it "live" but improving?
-            // Actually, if 'fast' is done, user can watch.
-            // Let's set to 'processing_low' done?
-            // The plan said: "Fast Transcode (Low Quality / 360p) first, updates the Lesson with this HLS URL for immediate playback."
             await LessonTranscode.findOneAndUpdate({ lessonId }, lessonUpdate);
 
-            // Call backend webhook to update Lesson content with HLS URL
-            // Call backend webhook to update Lesson content with HLS URL
             if (hlsStreamUrl) {
                 try {
                     console.log(`[Worker] Calling webhook to update lesson ${lessonId} with HLS URL`);
@@ -197,7 +197,6 @@ const processJob = async (job) => {
                         hlsUrl: hlsStreamUrl,
                         SECRET_KEY: process.env.SECRET_KEY
                     });
-                    console.log(`[Worker] Webhook sent successfully for ${lessonId}`);
                 } catch (err) {
                     console.error('[Worker] Failed to send update webhook:', err.message);
                 }
@@ -218,15 +217,13 @@ const processJob = async (job) => {
 
         console.log(`[Worker] Job ${jobId} completed successfully`);
 
-        // If FAST phase completed, enqueue FULL phase
+        // If FAST phase completed, enqueue BACKGROUND phase
         if (transcodeType === 'fast') {
-            console.log('[Worker] Enqueueing full quality transcode job...');
-            const redisConnection = new IORedis({
-                host: process.env.REDIS_HOST || 'localhost',
-                port: parseInt(process.env.REDIS_PORT) || 6379,
-                password: process.env.REDIS_PASSWORD || undefined,
+            console.log('[Worker] Enqueueing high quality transcode job to background lane...');
+            const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
+                maxRetriesPerRequest: null
             });
-            const queue = new Queue('video-transcode', { connection: redisConnection });
+            const queue = new Queue('transcode-background', { connection: redisConnection });
 
             const newJobId = uuid();
             await Job.create({
@@ -234,17 +231,17 @@ const processJob = async (job) => {
                 originalFileName,
                 rawVideoKey,
                 status: 'queued',
-                resolutions: { // simplistic init
+                resolutions: {
                     '480p': { status: 'pending' }, '720p': { status: 'pending' }, '1080p': { status: 'pending' }
                 }
             });
 
-            await queue.add('video-transcode', {
+            await queue.add('transcode-background', {
                 ...job.data,
                 jobId: newJobId,
-                transcodeType: 'full_remaining'
+                transcodeType: 'background'
             });
-            await queue.close(); // Important: close local queue connection or it keeps process alive/leaks
+            await queue.close();
         }
 
         return { success: true, hlsStreamUrl };
@@ -274,7 +271,6 @@ const processJob = async (job) => {
         throw error;
 
     } finally {
-        // Cleanup temp files
         if (tempDir) {
             try {
                 await fs.rm(tempDir, { recursive: true, force: true });
@@ -289,72 +285,57 @@ const processJob = async (job) => {
 const startWorker = async () => {
     await loadEnv();
 
-    // Connect to MongoDB
     const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/video-transcoder';
     await mongoose.connect(mongoURI);
     console.log('[Worker] MongoDB connected');
 
-    // Redis configuration
-    const redisConnection = new IORedis({
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT) || 6379,
-        password: process.env.REDIS_PASSWORD || undefined,
+    const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
         maxRetriesPerRequest: null
     });
 
-    console.log('[Worker] Starting video transcode worker...');
+    console.log('[Worker] Starting Smart Burst transcode workers...');
 
-    const worker = new Worker('video-transcode', processJob, {
+    // 1. Fast Lane Worker (360p Burst)
+    const fastWorker = new Worker('transcode-fast', processJob, {
         connection: redisConnection,
-        concurrency: parseInt(process.env.WORKER_CONCURRENCY) || 2,
-        // Lock duration - how long the job is locked before being considered stalled
-        lockDuration: 300000, // 5 minutes (transcoding can take a while)
-        lockRenewTime: 150000, // Renew lock every 2.5 minutes
-        stalledInterval: 60000, // Check for stalled jobs every minute
-        maxStalledCount: 2, // Allow job to be stalled twice before failing
-        limiter: {
-            max: 10,
-            duration: 60000 // Max 10 jobs per minute
-        }
+        concurrency: 1, // High power, sequential
+        lockDuration: 60000, // 1 minute is plenty for 360p burst
     });
 
-    worker.on('completed', (job, result) => {
-        console.log(`[Worker] ✓ Job ${job.id} completed successfully`);
+    // 2. Background Lane Worker (High Quality Restricted)
+    const backgroundWorker = new Worker('transcode-background', processJob, {
+        connection: redisConnection,
+        concurrency: 1, // Background sequential
+        lockDuration: 600000, // 10 minutes for HD transcoding
     });
 
-    worker.on('failed', (job, error) => {
-        console.error(`[Worker] ✗ Job ${job?.id} failed: ${error.message}`);
-    });
+    const setupListeners = (worker, name) => {
+        worker.on('completed', (job) => console.log(`[${name}] ✓ Job ${job.id} done`));
+        worker.on('failed', (job, err) => console.error(`[${name}] ✗ Job ${job?.id} failed: ${err.message}`));
+        worker.on('progress', (job, progress) => console.log(`[${name}] → Job ${job.id}: ${progress}%`));
+    };
 
-    worker.on('stalled', (jobId) => {
-        console.warn(`[Worker] ⚠ Job ${jobId} stalled - will be retried`);
-    });
+    setupListeners(fastWorker, 'FastWorker');
+    setupListeners(backgroundWorker, 'BackgroundWorker');
 
-    worker.on('progress', (job, progress) => {
-        console.log(`[Worker] → Job ${job.id} progress: ${progress}%`);
-    });
-
-    worker.on('error', (error) => {
-        console.error('[Worker] Worker error:', error);
-    });
-
-    // Graceful shutdown
     const shutdown = async () => {
         console.log('[Worker] Shutting down gracefully...');
-        console.log('[Worker] Waiting for active jobs to complete (max 30s)...');
-        await worker.close();
+        await fastWorker.close();
+        await backgroundWorker.close();
         await redisConnection.quit();
         await mongoose.disconnect();
-        console.log('[Worker] Shutdown complete');
         process.exit(0);
     };
 
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
 
-    console.log('[Worker] Worker is ready and listening for jobs');
-    console.log(`[Worker] Concurrency: ${parseInt(process.env.WORKER_CONCURRENCY) || 2}`);
+    console.log('[Worker] Workers are ready and listening');
 };
+
+startWorker().catch(console.error);
+
+export { processJob, startWorker };
 
 // Run worker if executed directly
 startWorker().catch(console.error);

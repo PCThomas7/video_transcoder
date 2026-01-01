@@ -15,6 +15,8 @@ export const transcodeVideo = async (inputPath, outputDir, options = {}) => {
 
     const targetResolutions = options.targetResolutions || Object.keys(resolutions);
     const playlistResolutions = options.playlistResolutions || Object.keys(resolutions);
+    const cpuThreads = options.cpuThreads !== undefined ? options.cpuThreads : 0; // 0 = auto
+    const preset = options.preset || 'fast';
 
     // Run ffmpeg sequentially per resolution to avoid overloading the host.
     for (const resolution of targetResolutions) {
@@ -27,11 +29,12 @@ export const transcodeVideo = async (inputPath, outputDir, options = {}) => {
         const segmentPattern = path.join(resDir, 'segment%03d.ts');
 
         const args = [
+            '-threads', cpuThreads.toString(),
             '-y', // overwrite
             '-i', inputPath,
             '-vf', `scale=w=${opts.width}:h=${opts.height}`,
             '-c:v', 'libx264',
-            '-preset', 'fast', // Faster encoding
+            '-preset', preset,
             '-b:v', opts.bitrate,
             '-maxrate', opts.bitrate, // Constrain max bitrate
             '-bufsize', `${parseInt(opts.bitrate) * 2}k`, // Buffer size = 2x bitrate

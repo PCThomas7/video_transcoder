@@ -1,4 +1,4 @@
-# 🛣️ upload.js - API Routes Definition
+# 🛣️ upload.js - API Routes
 
 ## 📍 Location
 `src/routes/upload.js`
@@ -7,247 +7,91 @@
 
 ## 🎯 What Does This File Do?
 
-This file defines all the **API endpoints** (URLs) that clients can call. It's like a menu at a restaurant - it tells you what's available and how to order it.
+This file defines the **URLs (endpoints)** that users and players can call. It acts like a receptionist, taking incoming requests and directing them to the right controller function.
+
+We have two "versions" of the API:
+1. **V1 (Async)**: Recommended for users. Uploads quickly and transcodes in the background.
+2. **Legacy (Sync)**: Older version. Blocks the user until transcoding is 100% finished.
+
+---
+
+## 📝 API Endpoints Summary
+
+### 🚀 V1 API (Recommended)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/upload/v1/upload` | Upload video & queue for transcoding |
+| `GET` | `/api/upload/v1/jobs/:jobId/status` | Check if a video is done transcoding |
+| `GET` | `/api/upload/v1/jobs` | List all historical transcoding jobs |
+| `POST` | `/api/upload/v1/jobs/:jobId/retry` | Restart a failed job |
+| `GET` | `/api/upload/v1/queue/stats` | See how many jobs are in the queue |
+
+### 🛠️ Legacy API
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/upload/upload` | Direct upload (No transcoding) |
+| `POST` | `/api/upload/upload-transcode` | Upload & Transcode (Blocks until finished) |
+
+### 📺 Streaming & Proxying
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/upload/hls/.../master.m3u8` | Get the master HLS playlist |
+| `GET` | `/api/upload/hls/.../playlist.m3u8` | Get quality-specific HLS playlist |
+| `GET` | `/api/upload/stream/...` | Get a playable proxy URL |
 
 ---
 
 ## 📝 Code Breakdown
 
-### Imports
+### 1. The Async Upload Route
 ```javascript
-import express from 'express';
-import uploadController from '../controllers/uploadController.js';
-import multerMemory from '../middlewares/multerMemory.js';
-import { s3Uploader } from '../middlewares/s3Uploader.js';
-```
-
-| Import | Purpose |
-|--------|---------|
-| `express` | To create the router |
-| `uploadController` | Contains the logic for each endpoint |
-| `multerMemory` | Handles file uploads |
-| `s3Uploader` | (Imported but not used in current routes) |
-
----
-
-### Router Creation
-```javascript
-const router = express.Router();
-```
-
-Creates a new router instance. Think of it as a mini-application that handles a group of related routes.
-
----
-
-## 🚏 Routes Explained
-
-### 1. Upload Without Transcoding
-```javascript
-router.post('/upload', 
-    multerMemory.single('video'), 
-    uploadController.uploadVideo.bind(uploadController)
+router.post('/v1/upload',
+    uploadToS3.single('video'),
+    asyncUploadController.uploadAndEnqueue.bind(asyncUploadController)
 );
 ```
-
-| Part | Meaning |
-|------|---------|
-| `router.post` | This route responds to POST requests |
-| `'/upload'` | The URL path (full: `/api/upload/upload`) |
-| `multerMemory.single('video')` | First: handle file upload from 'video' field |
-| `uploadController.uploadVideo` | Then: run this function |
-| `.bind(uploadController)` | Keep `this` context correct |
-
-**What it does:** Uploads the video directly to S3 without processing.
+**Step-by-Step:**
+1. **`router.post`**: This only works for `POST` requests (sending data).
+2. **`uploadToS3.single('video')`**: This is a middleware. Before our controller even starts, this middleware takes the file from the request and uploads it directly to S3.
+3. **`asyncUploadController`**: Once the file is safe in S3, this controller creates a background job in Redis and returns a `202 Accepted` status to the user immediately.
 
 ---
 
-### 2. Upload With Transcoding
+### 2. The HLS Proxy Routes
+These are special routes that allow players to watch videos stored in a **private** S3 bucket.
+
 ```javascript
-router.post('/upload-transcode', 
-    multerMemory.single('video'), 
-    uploadController.uploadAndTranscode.bind(uploadController)
-);
-```
-
-**What it does:**
-1. Uploads the original video to S3
-2. Transcodes it to multiple qualities (360p, 480p, 720p, 1080p)
-3. Creates HLS playlists
-4. Returns URLs for playing the video
-
----
-
-### 3. HLS Master Playlist Proxy
-```javascript
-router.get('/hls/:videoId/master.m3u8', 
+router.get('/hls/:courseId/:lessonId/:videoId/master.m3u8',
     uploadController.proxyHlsMaster.bind(uploadController)
 );
 ```
-
-**Example URL:** `/api/upload/hls/abc123-video/master.m3u8`
-
-**What it does:** Fetches the **Master Playlist** from S3. This playlist links to all the other quality levels (360p, 480p, etc.) and allows the video player to automatically switch qualities.
-
----
-
-### 4. HLS Playlist Proxy
-```javascript
-router.get('/hls/:videoId/:quality/playlist.m3u8', 
-    uploadController.proxyHlsPlaylist.bind(uploadController)
-);
-```
-
-| Part | Meaning |
-|------|---------|
-| `router.get` | Responds to GET requests |
-| `:videoId` | URL parameter - the video identifier |
-| `:quality` | URL parameter - like '360p' or '720p' |
-| `playlist.m3u8` | Fixed filename |
-
-**Example URL:** `/api/upload/hls/abc123-video/360p/playlist.m3u8`
-
-**What it does:** Fetches the HLS playlist from S3 and modifies the segment URLs to point to our server (for private bucket access).
-
----
-
-### 5. HLS Segment Proxy
-```javascript
-router.get('/hls/:videoId/:quality/:segment', 
-    uploadController.proxyHlsSegment.bind(uploadController)
-);
-```
-
-**Example URL:** `/api/upload/hls/abc123-video/360p/segment000.ts`
-
-**What it does:** Fetches individual video segments from S3 and streams them to the client.
-
----
-
-### 6. Get Stream URL
-```javascript
-router.get('/stream/:videoId/:quality?', 
-    uploadController.getStreamUrl.bind(uploadController)
-);
-```
-
-| Part | Meaning |
-|------|---------|
-| `:quality?` | Optional parameter (notice the `?`) |
-
-**What it does:** Returns a streaming URL for a video. If quality is not specified, defaults to 360p.
-
----
-
-## 🎯 URL Parameters Explained
-
-```
-/hls/:videoId/:quality/:segment
-      ↓         ↓        ↓
-      │         │        └── segment000.ts
-      │         └── 360p
-      └── abc123-myvideo
-```
-
-These parameters are accessible in the controller as:
-```javascript
-req.params.videoId  // 'abc123-myvideo'
-req.params.quality  // '360p'
-req.params.segment  // 'segment000.ts'
-```
-
----
-
-## 🔄 Request Flow Visualization
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                         CLIENT REQUEST                                  │
-│       POST /api/upload/upload-transcode                                │
-│       Content-Type: multipart/form-data                                │
-│       Body: video file                                                  │
-└───────────────────────────────┬────────────────────────────────────────┘
-                                │
-                                ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                         EXPRESS SERVER                                  │
-│                                                                        │
-│   index.js: app.use('/api/upload', uploadRouter)                       │
-│                      │                                                 │
-│                      ▼                                                 │
-│   ┌──────────────────────────────────────────────────────────────┐    │
-│   │                    upload.js (ROUTER)                         │    │
-│   │                                                               │    │
-│   │   POST /upload-transcode matched!                             │    │
-│   │                                                               │    │
-│   │   Step 1: multerMemory.single('video')                       │    │
-│   │           └── Parse uploaded file                             │    │
-│   │           └── Store in req.file                               │    │
-│   │                                                               │    │
-│   │   Step 2: uploadController.uploadAndTranscode                 │    │
-│   │           └── Process the video                               │    │
-│   │           └── Send response                                   │    │
-│   │                                                               │    │
-│   └──────────────────────────────────────────────────────────────┘    │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 📋 Complete API Reference
-
-| Method | Endpoint | Description | Request Body |
-|--------|----------|-------------|--------------|
-| POST | `/api/upload/upload` | Upload video without transcoding | `multipart/form-data` with 'video' field |
-| POST | `/api/upload/upload-transcode` | Upload and transcode video | `multipart/form-data` with 'video' field |
-| GET | `/api/upload/hls/:videoId/master.m3u8` | Get HLS master playlist | - |
-| GET | `/api/upload/hls/:videoId/:quality/playlist.m3u8` | Get HLS playlist | - |
-| GET | `/api/upload/hls/:videoId/:quality/:segment` | Get HLS segment | - |
-| GET | `/api/upload/stream/:videoId/:quality?` | Get stream URL | - |
+**How it works:**
+1. The video player asks for `master.m3u8`.
+2. Our server fetches it from S3.
+3. Our server "rewrites" the file to make sure the player comes back to us for the next pieces (segments).
+4. This keeps the S3 credentials safe on the server!
 
 ---
 
 ## 🧠 Key Concepts
 
-### What is a Router?
-A router is a way to organize routes in Express. Instead of defining all routes in `index.js`, you can group related routes in separate files.
+### What is `router.get` vs `router.post`?
+- **`GET`**: Used for fetching information (like "Give me the status").
+- **`POST`**: Used for sending information or performing actions (like "Upload this file").
 
-```javascript
-// Without router (messy)
-app.post('/api/upload/upload', ...)
-app.post('/api/upload/transcode', ...)
-app.get('/api/upload/hls', ...)
+### Route Parameters (`:jobId`, `:videoId`)
+When you see a colon like `:jobId`, it means that part of the URL is dynamic.
+- URL: `/api/upload/v1/jobs/123-abc/status`
+- In the code: `req.params.jobId` will be `"123-abc"`.
 
-// With router (organized)
-app.use('/api/upload', uploadRouter)
-// All routes in uploadRouter automatically get /api/upload prefix
-```
-
-### What is .bind()?
-`.bind(uploadController)` ensures that when the method runs, `this` refers to the controller object. Without it, `this` would be undefined.
-
-### What is a Route Parameter?
-Parts of the URL that can change:
-```
-/hls/:videoId/:quality
-      ↑         ↑
-      These are parameters
-```
-
-### What are HTTP Methods?
-| Method | Purpose |
-|--------|---------|
-| GET | Retrieve data |
-| POST | Create/send data |
-| PUT | Update data |
-| DELETE | Remove data |
+### .bind(controller)
+Inside classes, we use `.bind()` to make sure the keyword `this` still works correctly. Without it, the controller might lose track of its own properties.
 
 ---
 
 ## 🔗 Related Files
 
-This file uses:
-- [multerMemory.js](./README-multerMemory.md) - File upload handling
-- [uploadController.js](./README-uploadController.md) - Route handlers
-
-This file is used by:
-- [index.js](./README-index.md) - Mounts the router
+- [asyncUploadController.js](./README-async-controller.md) - Logic for the V1 API
+- [uploadController.js](./README-uploadController.md) - Logic for Legacy and Proxy API
+- [multerS3.js](./README-multerS3.md) - The tool that uploads to S3
+- [index.js](./README-index.md) - Mounts this router

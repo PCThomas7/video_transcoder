@@ -2,69 +2,39 @@ import express from "express";
 import axios from "axios";
 import fs from "fs";
 import path from "path";
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { S3Client } from "@aws-sdk/client-s3";
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
 import crypto from "crypto";
 import Job from "./src/models/Job.js";
-
-import LessonTranscode from "./src/models/LessonTranscode.js";
 import connectDB from "./src/config/db.js";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
-// Connect to DB for Lesson updates
 connectDB();
 
 // ====== CONFIG ======
-const RECORD_ROOT = "/root/ome/records/records"; // <-- your folder root
-const OME_API = process.env.OME_API || "http://127.0.0.1:8081"; // OME REST
-const OME_TOKEN = process.env.OME_TOKEN || ""; // if your OME uses token auth
+const RECORD_ROOT = "/root/ome/records/records";
+const OME_API = process.env.OME_API || "http://127.0.0.1:8081";
+const OME_TOKEN = process.env.OME_TOKEN || "";
 const VHOST = "default";
 const APPNAME = "app";
 
-console.log(OME_API);
-console.log(OME_TOKEN);
-
-// Wasabi S3 (S3-compatible)
-const wasabiEndpoint = process.env.WASABI_ENDPOINT || "https://s3.ap-south-1.wasabisys.com";
-
-const s3 = new S3Client({
-    region: process.env.WASABI_REGION || "ap-south-1",
-    endpoint: wasabiEndpoint.startsWith("http") ? wasabiEndpoint : `https://${wasabiEndpoint}`,
-    credentials: {
-        accessKeyId: process.env.WASABI_KEY,
-        secretAccessKey: process.env.WASABI_SECRET,
-    },
-    forcePathStyle: true,
-});
-
-const BUCKET = process.env.WASABI_BUCKET;
 const redis = new IORedis(process.env.REDIS_URL || "redis://127.0.0.1:6379");
-const transcodeQueue = new Queue("video-transcode", { connection: redis });
-
-// Helper: Generate pre-signed URL for S3 object (expires in 24 hours by default)
-const generatePresignedUrl = async (key, expiresIn = 86400) => {
-    const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
-    return await getSignedUrl(s3, command, { expiresIn });
-};
+const uploadQueue = new Queue("upload-queue", { connection: redis });
 
 // ====== HELPERS ======
 function omeHeaders() {
-    // Many OME setups use Authorization: Basic <token:>
-    // If yours is different, adjust here.
-    console.log("ome header is called");
     if (!OME_TOKEN) return { "Content-Type": "application/json" };
     const basic = Buffer.from(OME_TOKEN).toString("base64");
     return { Authorization: `Basic ${basic}`, "Content-Type": "application/json" };
 }
 
 async function omeStopRecord(recordId) {
-    // Endpoint name can differ by OME version; this is the typical pattern:
-    // POST /v1/vhosts/{vhost}/apps/{app}:stopRecord  body: { id: "..." }
-    console.log("ome stop recording", recordId);
     await axios.post(
         `${OME_API}/v1/vhosts/${VHOST}/apps/${APPNAME}:stopRecord`,
         { id: recordId },
@@ -72,60 +42,23 @@ async function omeStopRecord(recordId) {
     );
 }
 
-function makeRecordId(streamName) {
-    // short unique id (safe for filenames too)
-    return `${streamName}-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
-}
-
-async function omeStartRecord(streamName) {
-    console.log("ome start record", streamName);
-
-    const recordId = makeRecordId(streamName);
-
-    const payload = {
-        id: recordId,                 // ✅ required by your OME
-        stream: { name: streamName }, // ✅ required by your OME
-    };
-
-    const res = await axios.post(
-        `${OME_API}/v1/vhosts/${VHOST}/apps/${APPNAME}:startRecord`,
-        payload,
-        { headers: omeHeaders(), timeout: 10000 }
-    );
-
-    console.log("startRecord response:", res.data);
-
-    // In many versions OME just echoes success; safest is return the id we sent
-    return recordId;
-}
 async function omeGetRecord(recordId) {
-    // Typical: POST ...:records  body: { id }
-    console.log("ome get record", recordId);
     const res = await axios.post(
         `${OME_API}/v1/vhosts/${VHOST}/apps/${APPNAME}:records`,
         { id: recordId },
         { headers: omeHeaders(), timeout: 10000 }
     );
-
-    // Different builds return slightly different shapes.
-    // Try a few common patterns:
     const d = res.data;
     return d?.response?.[0] || d?.response || d?.records?.[0] || d?.records || d;
 }
 
 async function waitUntilStopped(recordId, timeoutMs = 10 * 60 * 1000) {
     const start = Date.now();
-    console.log("waiting until stopped", recordId);
     while (Date.now() - start < timeoutMs) {
         const info = await omeGetRecord(recordId);
-
-        // If info is an empty array or list, it means the recording is no longer active (active list is empty)
         if (Array.isArray(info) && info.length === 0) return null;
         if (!info) return null;
-
         const state = String(info?.state || info?.status || "").toLowerCase();
-        console.log(`[DEBUG] RecordId: ${recordId}, State: ${state}, Full Info:`, JSON.stringify(info));
-
         if (state === "stopped" || state === "error" || state === "finished" || state === "ready") return info;
         await new Promise((r) => setTimeout(r, 2000));
     }
@@ -133,8 +66,8 @@ async function waitUntilStopped(recordId, timeoutMs = 10 * 60 * 1000) {
 }
 
 function listFilesRecursive(dir) {
-    console.log("list files ", dir);
     const out = [];
+    if (!fs.existsSync(dir)) return out;
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
         const p = path.join(dir, ent.name);
         if (ent.isDirectory()) out.push(...listFilesRecursive(p));
@@ -144,198 +77,126 @@ function listFilesRecursive(dir) {
 }
 
 function pickLatestVideoFile(streamFolder) {
-    console.log("pick stream folder", streamFolder);
     if (!fs.existsSync(streamFolder)) return null;
-
-    // Look for mp4 first, otherwise ts.
     const files = listFilesRecursive(streamFolder)
         .filter((f) => /\.(mp4|ts)$/i.test(f))
         .map((f) => ({ f, mtime: fs.statSync(f).mtimeMs }))
         .sort((a, b) => b.mtime - a.mtime);
-
     return files[0]?.f || null;
 }
 
-async function uploadToWasabi(localFilePath, key) {
-    console.log("uploading to wasabi");
-    const body = fs.createReadStream(localFilePath);
-    await s3.send(
-        new PutObjectCommand({
-            Bucket: BUCKET,
-            Key: key,
-            Body: body,
-            ContentType: localFilePath.toLowerCase().endsWith(".mp4")
-                ? "video/mp4"
-                : "video/MP2T",
-        })
-    );
-    // Return a stable reference for workers (better than public URL)
-    return { bucket: BUCKET, key };
-}
-
-// ====== IMPORTANT: you must implement mapping streamName -> recordId + lessonId ======
-// simplest: store in Redis/DB when you START recording
 async function getLiveContext(streamName) {
-    console.log("get live context", streamName);
     const raw = await redis.get(`live:${streamName}`);
     return raw ? JSON.parse(raw) : null;
 }
 
+async function omeStartRecord(streamName) {
+    const recordId = `${streamName}-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+    await axios.post(
+        `${OME_API}/v1/vhosts/${VHOST}/apps/${APPNAME}:startRecord`,
+        { id: recordId, stream: { name: streamName } },
+        { headers: omeHeaders(), timeout: 10000 }
+    );
+    return recordId;
+}
+
 // ====== WEBHOOK ENDPOINT ======
 app.post("/ome/admission", async (req, res) => {
-    console.log("endpoint is called");
-    console.log(JSON.stringify(req.body, null, 2));
-
-    // must respond fast
+    // Fast response to OME
     res.json({ allowed: true });
 
     try {
         const request = req.body?.request;
-        if (!request) return;
+        if (!request || request.direction !== "incoming") return;
 
-        if (request.direction !== "incoming") return;
-
-        const streamName = request.url.split('rtmp://72.60.221.204:1935/app/')[1];
-        console.log(streamName);
-        const lessonId = streamName.split('_')[1];
-        console.log(lessonId);
-        const { data: { courseId } } = await axios.post(`${process.env.BACKEND_URL}/api/lessons/webhook/${lessonId}`, {
-            "SECRET_KEY": process.env.SECRET_KEY
-        }, {
-            headers: {
-                "Content-Type": "application/json"
-            }
-        });
-        console.log(courseId);
+        // Extract stream info
+        // Example URL: rtmp://72.60.221.204:1935/app/stream_123
+        const streamParts = request.url.split('/');
+        const streamName = streamParts[streamParts.length - 1];
         if (!streamName) return;
-        // ====== ON OPENING: start recording + save recordId ======
+
+        // ====== ON OPENING ======
         if (request.status === "opening") {
-            // start record and store in redis
-            console.log("connect open");
+            const lessonId = streamName.split('_')[1] || streamName;
+
+            // Get course metadata from backend
+            let courseId = "default";
+            try {
+                const { data } = await axios.post(`${process.env.BACKEND_URL}/api/lessons/webhook/${lessonId}`, {
+                    "SECRET_KEY": process.env.SECRET_KEY
+                });
+                courseId = data.courseId;
+            } catch (err) {
+                console.error("[Automate] Metadata fetch failed:", err.message);
+            }
+
             const recordId = await omeStartRecord(streamName);
-            console.log("record id", recordId);
-            // 
             await redis.set(
                 `live:${streamName}`,
                 JSON.stringify({ recordId, lessonId, courseId }),
-                "EX",
-                60 * 60 * 6 // keep up to 6 hours
+                "EX", 3600 * 6
             );
-
-            console.log("Recording started:", streamName, recordId);
+            console.log(`[BurstPipeline] Stream starting: ${streamName}, RecordID: ${recordId}`);
             return;
         }
 
-        // ====== ON CLOSING: stop recording + upload + enqueue ======
+        // ====== ON CLOSING ======
         if (request.status === "closing") {
-            console.log("connection close");
             const ctx = await getLiveContext(streamName);
-            console.log("ctx: ", ctx);
-            if (!ctx?.recordId) {
-                console.log("No ctx/recordId for stream:", streamName);
-                return;
-            }
+            if (!ctx?.recordId) return;
 
             const { recordId, lessonId, courseId } = ctx;
 
+            console.log(`[BurstPipeline] Stream ending: ${streamName}`);
             await omeStopRecord(recordId);
             await waitUntilStopped(recordId);
 
             const streamFolder = path.join(RECORD_ROOT, VHOST, APPNAME, streamName);
 
-            // Retry finding the file (handling potential race conditions where FS is slow)
-            async function waitForFile(folder, durationMs = 30000) {
-                const start = Date.now();
-                while (Date.now() - start < durationMs) {
-                    const f = pickLatestVideoFile(folder);
-                    if (f) return f;
-                    console.log(`[WaitFile] No file yet in ${folder}, retrying...`);
-                    await new Promise(r => setTimeout(r, 2000));
-                }
-                return null;
+            // Wait for file arrival
+            let localVideo = null;
+            for (let i = 0; i < 15; i++) {
+                localVideo = pickLatestVideoFile(streamFolder);
+                if (localVideo) break;
+                await new Promise(r => setTimeout(r, 2000));
             }
 
-            const localVideo = await waitForFile(streamFolder);
-            if (!localVideo) throw new Error(`No mp4/ts found in ${streamFolder} after waiting`);
+            if (!localVideo) {
+                console.error(`[BurstPipeline] No video file found for ${streamName}`);
+                return;
+            }
 
             const key = `recordings/${courseId}/${lessonId}/${path.basename(localVideo)}`;
-            const s3ref = await uploadToWasabi(localVideo, key);
-
-            // Update Lesson with Raw Video URL
-            // Use existing lessonId from context if available, otherwise use streamName
-            const effectiveLessonId = lessonId || streamName;
-
-            // Create/Update Lesson with Raw URL (using pre-signed URL for private bucket access)
-            try {
-                // Generate pre-signed URL for raw video (expires in 7 days)
-                const presignedVideoUrl = await generatePresignedUrl(key, 7 * 24 * 60 * 60);
-
-                await LessonTranscode.findOneAndUpdate(
-                    { lessonId: effectiveLessonId },
-                    {
-                        videoUrl: presignedVideoUrl,
-                        rawVideoKey: key, // Store the key for regenerating URLs later
-                        transcodingStatus: 'pending' // Ready for transcoding
-                    },
-                    { upsert: true }
-                );
-                // Add lesson update hook
-                try {
-                    console.log(`[Automate] Calling webhook for lesson ${effectiveLessonId}`);
-                    await axios.post(`${process.env.BACKEND_URL}/api/lessons/webhook/update-video`, {
-                        lessonId: effectiveLessonId,
-                        videoUrl: presignedVideoUrl,
-                        SECRET_KEY: process.env.SECRET_KEY
-                    });
-                } catch (err) {
-                    console.error("[Automate] Webhook failed:", err.message);
-                }
-            } catch (err) {
-                console.error("Failed to update Lesson model:", err);
-            }
-
-            // Create Job ID
             const jobId = crypto.randomUUID();
 
-            // Create Job Record
-            try {
-                await Job.create({
-                    jobId,
-                    originalFileName: path.basename(localVideo),
-                    rawVideoKey: key,
-                    status: 'queued',
-                    resolutions: {
-                        '360p': { status: 'pending' },
-                        '480p': { status: 'pending' },
-                        '720p': { status: 'pending' },
-                        '1080p': { status: 'pending' }
-                    }
-                });
-            } catch (err) {
-                console.error("Failed to create Job record:", err);
-            }
-
-            await transcodeQueue.add("video-transcode", {
+            // Track job in DB
+            await Job.create({
                 jobId,
-                lessonId: effectiveLessonId,
-                streamName,
                 originalFileName: path.basename(localVideo),
-                localFilePath: localVideo, // Local path for direct transcoding
                 rawVideoKey: key,
-                transcodeType: "fast", // <--- Trigger Fast Transcode
-                input: s3ref,
-                outputPrefix: `vod/${VHOST}/${APPNAME}/${streamName}/`,
+                status: 'queued',
+                resolutions: { '360p': { status: 'pending' } }
+            });
+
+            // Phase 1: Upload to S3
+            await uploadQueue.add("upload-job", {
+                jobId,
+                localVideo,
+                key,
+                lessonId,
+                courseId,
+                streamName,
+                originalFileName: path.basename(localVideo)
             });
 
             await redis.del(`live:${streamName}`);
-            console.log("DONE:", streamName, "uploaded:", s3ref);
+            console.log(`[BurstPipeline] Enqueued upload phase for ${streamName}`);
             return;
         }
 
-        console.log("Ignored status:", request.status);
     } catch (e) {
-        console.error("Webhook error:", e || e?.message);
+        console.error("[Automate] Webhook error:", e.message);
     }
 });
 
-app.listen(3000, () => console.log("Control server listening on :3000"));
+app.listen(3000, () => console.log("Automation Control listening on :3000"));

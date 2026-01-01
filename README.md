@@ -99,10 +99,10 @@ flowchart LR
 **GET** `/api/upload/stream/:videoId`
 - Returns the HLS master playlist URL.
 
-## 📂 Project Structure
+## 📂 Project Structure & Documentation
 
-- `src/index.js` - API Server entry point
-- `src/services/transcodeWorker.js` - Background worker process
-- `src/controllers/asyncUploadController.js` - Async upload logic
-- `src/config/queue.js` - Redis & BullMQ configuration
-- `src/models/Job.js` - MongoDB Job schema
+- [🚀 Entry Point](./docs/README-index.md) (`src/index.js`)
+- [👷 Background Worker](./docs/README-queue-worker.md) (`src/workers/transcodeWorker.js`)
+- [🎮 Async Controller](./docs/README-async-controller.md) (`src/controllers/asyncUploadController.js`)
+- [📥 Queue Config](./docs/README-queue-config.md) (`src/config/queue.js`)
+- [🗄️ Database Models](./docs/README-models.md) (`src/models/Job.js`)

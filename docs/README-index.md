@@ -10,18 +10,22 @@
 This is the **starting point** of the application. When you run `node src/index.js`, this file:
 
 1. Creates an Express web server
-2. Configures middleware (CORS, JSON parsing)
-3. Sets up API routes
-4. Starts listening for incoming requests
+2. Connects to **MongoDB** (Database)
+3. Connects to **Redis** (for Queues)
+4. Configures middleware (CORS, JSON parsing)
+5. Sets up API routes
+6. Starts listening for incoming requests
 
 ---
 
 ## 📝 Code Breakdown
 
 ```javascript
-import express from 'express'
-import cors from 'cors'
-import uploadRouter from './routes/upload.js'
+import express from 'express';
+import cors from 'cors';
+import connectDB from './config/db.js';
+import { redisConnection, initQueueEvents } from './config/queue.js';
+import uploadRouter from './routes/upload.js';
 ```
 
 ### What's Happening Here?
@@ -30,28 +34,31 @@ import uploadRouter from './routes/upload.js'
 |--------|---------|
 | `express` | Web framework to create the server |
 | `cors` | Allows requests from other domains (like your frontend) |
+| `connectDB` | Function to establish connection with MongoDB |
+| `redisConnection` | The connection object for our Redis server |
+| `initQueueEvents` | Sets up listeners for background job events |
 | `uploadRouter` | The routes for handling video uploads |
 
 ---
 
 ```javascript
-const app = express()
-const port = process.env.PORT || 2000
+const app = express();
+app.set('trust proxy', true);
+const port = process.env.PORT || 2000;
 ```
 
 ### What's Happening Here?
 
 1. **`app = express()`** - Creates an Express application
-2. **`port = process.env.PORT || 2000`** - Uses port from environment variable, or defaults to 2000
-
-> 💡 **Environment Variables**: Values that can be set outside the code. Useful for secrets and configuration.
+2. **`app.set('trust proxy', true)`** - Tells Express to trust the proxy (like Nginx), important for getting correct IP addresses.
+3. **`port = process.env.PORT || 2000`** - Uses port from environment variable, or defaults to 2000
 
 ---
 
 ```javascript
-app.use(cors())
-app.use(express.json())
-app.use(express.urlencoded({ extended: false }))
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 ```
 
 ### Middleware Configuration
@@ -59,36 +66,46 @@ app.use(express.urlencoded({ extended: false }))
 | Middleware | What It Does |
 |------------|--------------|
 | `cors()` | Allows cross-origin requests (frontend on different domain can call this API) |
-| `express.json()` | Parses JSON data in request body |
+| `express.json()` | Parses JSON data in request body so we can use `req.body` |
 | `express.urlencoded()` | Parses URL-encoded data (like form submissions) |
 
 ---
 
 ```javascript
-app.use('/api/upload', uploadRouter)
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+```
+
+### Health Check Endpoint
+This is used to check if the server is running. If it returns `200 OK`, everything is fine!
+
+---
+
+```javascript
+app.use('/api/upload', uploadRouter);
 ```
 
 ### Route Mounting
 
 This line says: "Use the `uploadRouter` for any request that starts with `/api/upload`"
 
-**Example:**
-- Request to `/api/upload/upload-transcode` → Handled by `uploadRouter`
-- Request to `/api/users` → Not handled (no route defined)
-
 ---
 
+## 🚀 The startServer Function
+
 ```javascript
-app.listen(port, () => {
-    console.log(`Server is running at http://localhost:${port}`)
-})
+const startServer = async () => {
+    try {
+        await connectDB(); // 1. Connect to Database
+        await redisConnection.ping(); // 2. Check Redis connection
+        await initQueueEvents(); // 3. Start job tracking
+        app.listen(port, () => { ... }); // 4. Start the server
+    } catch (error) {
+        process.exit(1); // Stop if something goes wrong
+    }
+};
 ```
-
-### Starting the Server
-
-- **`app.listen(port, callback)`** - Starts the server on the specified port
-- The callback function runs when the server is ready
-- Prints a message so you know the server started
 
 ---
 
@@ -97,31 +114,25 @@ app.listen(port, () => {
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    HTTP Request                         │
-│              (e.g., POST /api/upload/upload)            │
+│              (e.g., POST /api/upload/v1/upload)         │
 └─────────────────────────┬───────────────────────────────┘
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────┐
-│                 1. CORS Middleware                      │
-│          (Check if request is allowed)                  │
+│                 1. Global Middlewares                   │
+│          (CORS, JSON Parsing, etc.)                     │
 └─────────────────────────┬───────────────────────────────┘
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────┐
-│              2. express.json() Middleware               │
-│           (Parse JSON body if present)                  │
+│                2. uploadRouter                          │
+│    (Routes like /api/upload/v1/upload)                  │
 └─────────────────────────┬───────────────────────────────┘
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────┐
-│           3. express.urlencoded() Middleware            │
-│         (Parse form data if present)                    │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│                4. uploadRouter                          │
-│    (Handle /api/upload/* routes)                        │
+│                3. Controller Logic                      │
+│    (Processes files, talks to S3/Redis)                 │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -129,37 +140,16 @@ app.listen(port, () => {
 
 ## 🧠 Key Concepts
 
-### What is Express?
-Express is a minimal web framework for Node.js. It makes it easy to:
-- Handle HTTP requests (GET, POST, PUT, DELETE)
-- Define routes (URLs)
-- Use middleware (functions that process requests)
+### What is Redis?
+Redis is a super-fast "in-memory" database. We use it to manage our **Job Queue**. When a video is uploaded, we tell Redis "Hey, remember this video needs to be transcoded!"
 
-### What is CORS?
-**CORS** = Cross-Origin Resource Sharing
-
-By default, browsers block requests from one domain to another. CORS headers tell the browser "it's okay to call this API from another domain."
-
-**Example:**
-- Your frontend is at `http://localhost:3000`
-- Your backend is at `http://localhost:2000`
-- Without CORS, the browser would block API calls from frontend to backend
-
-### What is Middleware?
-Middleware functions have access to:
-- The request object (`req`)
-- The response object (`res`)
-- The next middleware function (`next`)
-
-They can:
-- Execute code
-- Modify request/response objects
-- End the request-response cycle
-- Call the next middleware
+### Why Async startServer?
+We shouldn't start the web server until we are **sure** we have a connection to MongoDB and Redis. Otherwise, the app would crash when trying to handle a request.
 
 ---
 
 ## 🔗 Related Files
 
-This file imports:
+- [db.js](./README-db.md) - MongoDB connection details
+- [queue.js](./README-queue-config.md) - Redis and Queue configuration
 - [upload.js](./README-upload-routes.md) - Defines the upload routes
